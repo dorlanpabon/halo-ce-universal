@@ -111,8 +111,11 @@ An `adb pull` of the whole `save` folder stops at the `blam.lst` files of
 The touch buttons stay inside the stable system-bar, gesture and display-cutout
 margins on all four edges. Hide and Settings have a separate top row. These
 display adjustments do not overwrite the saved HUD positions. Mobile presets
-keep their earlier arrangement, with only Fire moved slightly away from Melee.
-Unchanged redistributed presets are restored; custom HUD positions are preserved. Game Icons silhouettes
+keep their earlier arrangement, with an aligned right column, an aligned bottom
+row and slightly smaller Fire targets. Secondary buttons share a 34-unit radius;
+Fire uses 48 and left Fire 44 on the 960 x 540 layout grid. Unchanged earlier
+presets are upgraded; custom HUD positions, visibility and manually changed
+button sizes are preserved. Game Icons silhouettes
 replace the small line drawings; X / USAR and Y / ARMA match the game's prompts.
 The icons' CC BY 3.0 attribution is in `assets/notices/game-icons.txt` in the APK.
 Touch Pause and Back open the Android pause dialog, including in demo maps
@@ -215,6 +218,9 @@ These are `input.gyro_aim` and the four after it in `config.toml`. The
 gyroscope aims while the touch controls show.
 - "Ajustes" stays available during loading and cinematics and opens these items:
   - "Controles predefinidos": two thumbs, three fingers or the original Ports layout.
+    Three fingers includes a second Fire button above the movement stick; two
+    thumbs keeps it hidden. General > Disparo izquierdo toggles it without
+    replacing the HUD; its visibility can also be changed in the HUD editor.
     The mobile presets use a floating stick, 60% opacity and no vibration.
   - "Perfiles gráficos": five presets. Supremo ligero draws 480 x 360 pixels
     internally (640 x 480 logical, 4:3), disables shadows and extra effects,
