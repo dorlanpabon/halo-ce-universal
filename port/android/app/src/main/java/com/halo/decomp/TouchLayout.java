@@ -131,7 +131,8 @@ final class TouchLayout {
     }
 
     float x(int control) {
-        return constrainX(controls.get(control).x, radius(control));
+        float usable = Math.max(0, width - safeLeft - safeRight);
+        return constrainX(safeLeft + controls.get(control).x * usable / width, radius(control));
     }
 
     float y(int control) {
@@ -248,7 +249,9 @@ final class TouchLayout {
         if (!Float.isFinite(x) || !Float.isFinite(y))
             return;
         float radius = radius(control);
-        controls.get(control).x = constrainX(x, radius);
+        float usable = width - safeLeft - safeRight;
+        controls.get(control).x = usable > 0
+            ? (constrainX(x, radius) - safeLeft) * width / usable : width / 2;
         controls.get(control).y = constrainY(y, radius);
     }
 
