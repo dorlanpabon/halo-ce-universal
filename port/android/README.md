@@ -222,6 +222,11 @@ gyroscope aims while the touch controls show.
     thumbs keeps it hidden. General > Disparo izquierdo toggles it without
     replacing the HUD; its visibility can also be changed in the HUD editor.
     The mobile presets use a floating stick, 60% opacity and no vibration.
+    Hold the movement stick straight forward for 0.6 seconds to lock forward
+    movement, then lift the finger; the lock indicator stays visible. Touch the
+    stick again to resume manual movement. Pausing, opening settings, hiding the
+    HUD, leaving the app or a cancelled touch clears the lock. General > Avance
+    automático disables or enables this gesture; the choice is saved on the phone.
   - "Perfiles gráficos": five presets. Supremo ligero draws 480 x 360 pixels
     internally (640 x 480 logical, 4:3), disables shadows and extra effects,
     and caps presentation at 30 FPS. Ligero panorámico draws 801 x 360

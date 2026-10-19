@@ -73,6 +73,7 @@ public final class TouchControls extends View implements SensorEventListener, In
     private static final float STICK_DEAD_ZONE = 0.12f;
     private static final float STICK_REACH = 1.28f;
     private static final float STICK_KNOB_RADIUS = 24;
+    private static final long AUTO_WALK_HOLD_MS = 600;
     /** a floating stick goes where a thumb lands in this part of the display (from the lower left) */
     private static final float FLOATING_ZONE_WIDTH = 0.45f;
     private static final float FLOATING_ZONE_TOP = 0.35f;
@@ -97,6 +98,7 @@ public final class TouchControls extends View implements SensorEventListener, In
     private static final String PREFERENCES = "touch-layout-v1";
     private static final String KEY_CONFIGURATION = "configuration";
     private static final String KEY_HIDDEN = "hidden";
+    private static final String KEY_AUTO_WALK = "auto-walk";
 
     /**
      * a kind of control: the SDL button bit or trigger axis it sends (-1 for
@@ -211,6 +213,10 @@ public final class TouchControls extends View implements SensorEventListener, In
     private boolean stickFloating;
     private float stickX;
     private float stickY;
+    private boolean autoWalkEnabled;
+    private boolean autoWalkLocked;
+    private long autoWalkSince = -1;
+    private final Runnable lockAutoWalk = this::latchAutoWalk;
     private int dragPointer = -1;
     private int dragControl = -1;
     private float dragOffsetX;
@@ -270,6 +276,7 @@ public final class TouchControls extends View implements SensorEventListener, In
         inputManager = (InputManager) context.getSystemService(Context.INPUT_SERVICE);
         touchscreenFeature = context.getPackageManager().hasSystemFeature(PackageManager.FEATURE_TOUCHSCREEN);
         preferences = context.getSharedPreferences(PREFERENCES, Context.MODE_PRIVATE);
+        autoWalkEnabled = preferences.getBoolean(KEY_AUTO_WALK, true);
         activeHud = Math.max(0, Math.min(2, preferences.getInt("hud-slot", 0)));
         loadLayout(context);
         hidden = preferences.getBoolean(KEY_HIDDEN, false);
@@ -494,6 +501,7 @@ public final class TouchControls extends View implements SensorEventListener, In
     /** lets go of every finger and sends a released controller */
     public void reset() {
         cancelGrenadePulse();
+        cancelAutoWalk();
         dragPointer = -1;
         dragControl = -1;
         owners.clear();
@@ -583,6 +591,37 @@ public final class TouchControls extends View implements SensorEventListener, In
         }
         axes[0] = Math.round(dx * 32767);
         axes[1] = Math.round(dy * 32767);
+        if (!autoWalkEnabled || !forwardForAutoWalk()) {
+            cancelAutoWalk();
+        } else if (autoWalkLocked) {
+            axes[0] = 0;
+            axes[1] = -32767;
+        } else if (autoWalkSince < 0) {
+            autoWalkSince = SystemClock.uptimeMillis();
+            releaseHandler.postDelayed(lockAutoWalk, AUTO_WALK_HOLD_MS);
+        }
+    }
+
+    private boolean forwardForAutoWalk() {
+        return axes[1] <= -0.9f * 32767 && Math.abs(axes[0]) <= 0.25f * 32767;
+    }
+
+    private void cancelAutoWalk() {
+        releaseHandler.removeCallbacks(lockAutoWalk);
+        autoWalkSince = -1;
+        autoWalkLocked = false;
+    }
+
+    private void latchAutoWalk() {
+        autoWalkSince = -1;
+        if (!autoWalkEnabled || !held(TouchLayout.LEFT) || !forwardForAutoWalk()
+                || !showing || hidden || editing || openDialogs > 0)
+            return;
+        autoWalkLocked = true;
+        axes[0] = 0;
+        axes[1] = -32767;
+        publish();
+        invalidate();
     }
 
     // ---------- fingers
@@ -727,9 +766,10 @@ public final class TouchControls extends View implements SensorEventListener, In
             toolbarFingers.put(id, new float[] {px, py, target});
         } else if (target != NOTHING) {
             owners.put(id, target);
-            if (layout.type(target) == TouchLayout.LEFT)
+            if (layout.type(target) == TouchLayout.LEFT) {
+                cancelAutoWalk();
                 moveStick(target, x, y);
-            else
+            } else
                 buttonTouches.put(id, new float[] {px, py});
         } else if (!hidden && !inGestureZone(px, py, false)) {
             // A dedicated aiming finger takes over from dragging a held Fire button.
@@ -802,9 +842,14 @@ public final class TouchControls extends View implements SensorEventListener, In
         int control = owners.get(id, NOTHING);
         int releasedType = control >= 0 ? layout.type(control) : NOTHING;
         if (control >= 0 && layout.type(control) == TouchLayout.LEFT) {
-            axes[0] = 0;
-            axes[1] = 0;
-            stickFloating = false;
+            moveStick(control, logical(px), logical(py));
+            releaseHandler.removeCallbacks(lockAutoWalk);
+            autoWalkSince = -1;
+            if (!autoWalkLocked) {
+                axes[0] = 0;
+                axes[1] = 0;
+                stickFloating = false;
+            }
         }
         boolean wasLooking = id == lookPointer;
         owners.delete(id);
@@ -1184,6 +1229,17 @@ public final class TouchControls extends View implements SensorEventListener, In
         });
         panel.addView(leftFire);
 
+        Switch autoWalk = new Switch(getContext());
+        autoWalk.setText("Avance automático");
+        autoWalk.setChecked(autoWalkEnabled);
+        autoWalk.setOnCheckedChangeListener((view, enabled) -> {
+            autoWalkEnabled = enabled;
+            reset();
+            preferences.edit().putBoolean(KEY_AUTO_WALK, enabled).commit();
+        });
+        panel.addView(autoWalk);
+        panel.addView(text("Mantén el joystick arriba para fijar el avance. Tócalo de nuevo para detenerte."));
+
         TextView opacityLabel = text("");
         SeekBar opacity = new SeekBar(getContext());
         int steps = Math.round((TouchLayout.MAX_OPACITY - TouchLayout.MIN_OPACITY) * 20);
@@ -1532,7 +1588,25 @@ public final class TouchControls extends View implements SensorEventListener, In
         float opacity = editing && !layout.shown(stick) ? 0.15f : layout.opacity(stick);
         circle(canvas, x, y, radius, "", false, 11 * size, opacity);
         circle(canvas, x + axes[0] / 32767f * radius, y + axes[1] / 32767f * radius,
-            Math.max(STICK_KNOB_RADIUS * size, radius * 0.375f), "", held(stick), 11, opacity);
+            Math.max(STICK_KNOB_RADIUS * size, radius * 0.375f), "", held(stick) || autoWalkLocked, 11, opacity);
+        if (!editing && (autoWalkLocked || autoWalkSince >= 0)) {
+            float badgeY = layout.constrainY(y - radius - 40, 20);
+            circle(canvas, x, badgeY, 18, "", autoWalkLocked, 11, Math.max(opacity, .8f));
+            paint.setStyle(Paint.Style.STROKE);
+            paint.setStrokeWidth(2);
+            if (autoWalkLocked) {
+                canvas.drawRoundRect(x - 7, badgeY - 3, x + 7, badgeY + 8, 2, 2, paint);
+                canvas.drawArc(x - 5, badgeY - 11, x + 5, badgeY + 1, 180, 180, false, paint);
+            } else {
+                float progress = Math.min(1, (SystemClock.uptimeMillis() - autoWalkSince) / (float) AUTO_WALK_HOLD_MS);
+                paint.setColor(0xffaee7ff);
+                canvas.drawArc(x - 20, badgeY - 20, x + 20, badgeY + 20, -90, progress * 360, false, paint);
+                postInvalidateDelayed(33);
+            }
+            paint.setStyle(Paint.Style.FILL);
+            paint.setTextSize(11);
+            canvas.drawText(autoWalkLocked ? "AVANCE FIJO" : "MANTÉN ↑", x, badgeY + 33, paint);
+        }
     }
 
     @Override
