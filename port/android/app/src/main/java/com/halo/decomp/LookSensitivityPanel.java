@@ -22,11 +22,19 @@ final class LookSensitivityPanel extends LinearLayout {
     private final TextView valueLabel;
     private final SeekBar slider;
     private final CameraPreview preview;
+    private final TextView horizontalLabel;
+    private final Button[] horizontalPresets = new Button[3];
+    private final float[] horizontalValues = {1f, TouchLayout.DEFAULT_HORIZONTAL_SENSITIVITY, 4f};
     private final Button[] presets = new Button[3];
     private final float[] presetValues = {0.75f, 1f, 2f};
     private float sensitivity;
+    private float horizontalSensitivity = 1f;
 
     LookSensitivityPanel(Context context, float initial, float logicalUnitsPerPixel) {
+        this(context, initial, 1f, logicalUnitsPerPixel);
+    }
+
+    LookSensitivityPanel(Context context, float initial, float horizontalInitial, float logicalUnitsPerPixel) {
         super(context);
         setOrientation(HORIZONTAL);
         setPadding(dp(12), dp(8), dp(12), dp(8));
@@ -34,7 +42,7 @@ final class LookSensitivityPanel extends LinearLayout {
         setGravity(Gravity.CENTER_VERTICAL);
 
         ScrollView scroll = new ScrollView(context);
-        addView(scroll, new LayoutParams(0, dp(232), 1f));
+        addView(scroll, new LayoutParams(0, dp(252), 1f));
         LinearLayout controls = new LinearLayout(context);
         controls.setOrientation(VERTICAL);
         controls.setPadding(0, 0, dp(12), 0);
@@ -71,12 +79,23 @@ final class LookSensitivityPanel extends LinearLayout {
         steps.addView(less, new LayoutParams(0, dp(44), 1f));
         steps.addView(more, new LayoutParams(0, dp(44), 1f));
         controls.addView(steps);
+        horizontalLabel = label(13);
+        controls.addView(horizontalLabel);
+        LinearLayout horizontalRow = new LinearLayout(context);
+        String[] horizontalNames = {"Clásico", "Ágil", "Amplio"};
+        for (int i = 0; i < horizontalPresets.length; i++) {
+            final float gain = horizontalValues[i];
+            horizontalPresets[i] = button(horizontalNames[i]);
+            horizontalPresets[i].setOnClickListener(view -> setHorizontalValue(gain));
+            horizontalRow.addView(horizontalPresets[i], new LayoutParams(0, dp(40), 1f));
+        }
+        controls.addView(horizontalRow);
         TextView help = label(12);
-        help.setText("Menor: ajuste fino. Mayor: giro rápido.\nPrueba a la derecha antes de guardar.");
+        help.setText("Ágil: menos deslizamientos para girar. Prueba a la derecha.");
         controls.addView(help);
 
         preview = new CameraPreview(context, logicalUnitsPerPixel);
-        addView(preview, new LayoutParams(0, dp(232), 1f));
+        addView(preview, new LayoutParams(0, dp(252), 1f));
         slider.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
             @Override public void onProgressChanged(SeekBar bar, int progress, boolean user) {
                 setValue(TouchLayout.MIN_SENSITIVITY + progress * STEP);
@@ -85,10 +104,25 @@ final class LookSensitivityPanel extends LinearLayout {
             @Override public void onStopTrackingTouch(SeekBar bar) {}
         });
         setValue(initial);
+        setHorizontalValue(horizontalInitial);
     }
 
     float value() {
         return sensitivity;
+    }
+
+    float horizontalValue() {
+        return horizontalSensitivity;
+    }
+
+    void setHorizontalValue(float value) {
+        horizontalSensitivity = TouchLayout.validHorizontalSensitivity(value)
+            ? value : TouchLayout.DEFAULT_HORIZONTAL_SENSITIVITY;
+        horizontalLabel.setText(String.format(Locale.getDefault(), "Giro horizontal  %.2f×", horizontalSensitivity));
+        for (int i = 0; i < horizontalPresets.length; i++)
+            horizontalPresets[i].setTextColor(Math.abs(horizontalSensitivity - horizontalValues[i]) < 0.001f
+                ? ACCENT : 0xffeeeeee);
+        preview.invalidate();
     }
 
     void setValue(float value) {
@@ -191,26 +225,39 @@ final class LookSensitivityPanel extends LinearLayout {
             }
             if (action == MotionEvent.ACTION_MOVE) {
                 int index = event.findPointerIndex(pointer);
-                if (index >= 0) {
-                    float x = event.getX(index), y = event.getY(index);
-                    float dx = (x - lastX) * unitsPerPixel * value() * TouchControls.LOOK_RADIANS_PER_UNIT;
-                    float dy = (y - lastY) * unitsPerPixel * value() * TouchControls.LOOK_RADIANS_PER_UNIT;
-                    if (Float.isFinite(dx) && Float.isFinite(dy)) {
-                        yaw = (float) Math.IEEEremainder(yaw + dx, Math.PI * 2);
-                        pitch = Math.max(-(float) Math.PI / 2, Math.min((float) Math.PI / 2, pitch + dy));
-                        invalidate();
-                    }
-                    lastX = x;
-                    lastY = y;
-                }
+                if (index >= 0)
+                    consume(event, index);
             } else if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL
                 || (action == MotionEvent.ACTION_POINTER_UP && event.getPointerId(event.getActionIndex()) == pointer)) {
+                int index = event.findPointerIndex(pointer);
+                if (action != MotionEvent.ACTION_CANCEL && index >= 0)
+                    consume(event, index);
                 pointer = -1;
                 getParent().requestDisallowInterceptTouchEvent(false);
                 if (action == MotionEvent.ACTION_UP)
                     performClick();
             }
             return true;
+        }
+
+        private void consume(MotionEvent event, int index) {
+            for (int i = 0; i < event.getHistorySize(); i++)
+                move(event.getHistoricalX(index, i), event.getHistoricalY(index, i));
+            move(event.getX(index), event.getY(index));
+        }
+
+        private void move(float x, float y) {
+            float dx = (x - lastX) * unitsPerPixel * value() * horizontalValue()
+                * TouchControls.LOOK_RADIANS_PER_UNIT;
+            float dy = (y - lastY) * unitsPerPixel * value() * TouchControls.LOOK_RADIANS_PER_UNIT;
+            if (Float.isFinite(dx) && Float.isFinite(dy)) {
+                yaw = (float) Math.IEEEremainder(yaw + dx, Math.PI * 2);
+                pitch = Math.max(-(float) Math.PI / 2, Math.min((float) Math.PI / 2, pitch + dy));
+                if (dx != 0 || dy != 0)
+                    invalidate();
+            }
+            lastX = x;
+            lastY = y;
         }
 
         @Override public boolean performClick() {

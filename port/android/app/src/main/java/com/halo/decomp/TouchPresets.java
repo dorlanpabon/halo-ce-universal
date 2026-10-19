@@ -68,7 +68,7 @@ final class TouchPresets {
                     || Math.abs(saved.layout.savedY(i) - PLACES[i][1]) > 0.1f)
                 saved.layout.move(i, PLACES[i][0], PLACES[i][1]);
         }
-        return saved.layout.exportConfiguration(saved.sensitivity);
+        return saved.layout.exportConfiguration(saved.sensitivity, saved.horizontalSensitivity);
     }
 
     private static String mobile(boolean secondFire) {

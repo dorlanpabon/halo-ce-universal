@@ -188,6 +188,58 @@ public class LookSensitivityPanelHostTest {
         }
     }
 
+    @Test public void horizontalPresetsChangeOnlyTheDraftByTouch() {
+        install(new LookSensitivityPanel(activity, 1.5f, 2.25f, 1f));
+        assertEquals(2.25f, panel.horizontalValue(), 0.0001f);
+        tap(button("Clásico"));
+        assertEquals(1f, panel.horizontalValue(), 0.0001f);
+        tap(button("Ágil"));
+        assertEquals(2.25f, panel.horizontalValue(), 0.0001f);
+        tap(button("Amplio"));
+        assertEquals(4f, panel.horizontalValue(), 0.0001f);
+        panel.setHorizontalValue(2.25f);
+        assertEquals(2.25f, panel.horizontalValue(), 0.0001f);
+        assertEquals(1.5f, panel.value(), 0.0001f);
+        assertEquals(savedPreferences, preferences.getAll());
+    }
+
+    @Test public void agileHorizontalGainTurnsFurtherWithoutChangingVerticalAim() {
+        install(new LookSensitivityPanel(activity, 1.5f, 1f, 0.5f));
+        View classic = preview();
+        gesture(classic, 50, 50, 90, 70, MotionEvent.ACTION_UP);
+        float classicYaw = yaw(classic);
+        float classicPitch = ReflectionHelpers.getField(classic, "pitch");
+        assertEquals(40 * 0.5f * 1.5f * 0.0022f, classicYaw, 0.0001f);
+        assertEquals(20 * 0.5f * 1.5f * 0.0022f, classicPitch, 0.0001f);
+        install(new LookSensitivityPanel(activity, 1.5f, 2.25f, 0.5f));
+        View agile = preview();
+        gesture(agile, 50, 50, 90, 70, MotionEvent.ACTION_UP);
+        assertEquals(classicYaw * 2.25f, yaw(agile), 0.0001f);
+        assertEquals(classicPitch, ReflectionHelpers.<Float>getField(agile, "pitch"), 0.0001f);
+        assertEquals(savedPreferences, preferences.getAll());
+    }
+
+    @Test public void horizontalPreviewConsumesBatchedMovementAndTheFinalReleaseDelta() {
+        install(new LookSensitivityPanel(activity, 1.5f, 2.25f, 0.5f));
+        View preview = preview();
+        long time = SystemClock.uptimeMillis();
+        dispatch(preview, time, time, MotionEvent.ACTION_DOWN, 50, 50);
+        MotionEvent movement = MotionEvent.obtain(time, time + 10, MotionEvent.ACTION_MOVE, 70, 55, 0);
+        try {
+            movement.addBatch(time + 20, 80, 65, 1f, 1f, 0);
+            assertEquals(1, movement.getHistorySize());
+            preview.dispatchTouchEvent(movement);
+        } finally {
+            movement.recycle();
+        }
+        assertEquals(30 * 0.5f * 1.5f * 2.25f * 0.0022f, yaw(preview), 0.0001f);
+        dispatch(preview, time, time + 30, MotionEvent.ACTION_UP, 100, 70);
+        assertEquals(50 * 0.5f * 1.5f * 2.25f * 0.0022f, yaw(preview), 0.0001f);
+        assertEquals(20 * 0.5f * 1.5f * 0.0022f,
+            ReflectionHelpers.<Float>getField(preview, "pitch"), 0.0001f);
+        assertEquals(savedPreferences, preferences.getAll());
+    }
+
     private void install(LookSensitivityPanel next) {
         root.removeAllViews();
         panel = next;

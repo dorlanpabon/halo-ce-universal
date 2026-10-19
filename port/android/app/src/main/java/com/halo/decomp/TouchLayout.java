@@ -27,6 +27,9 @@ final class TouchLayout {
     static final float MAX_OPACITY = 1f;
     static final float MIN_SENSITIVITY = 0.25f;
     static final float MAX_SENSITIVITY = 4f;
+    static final float DEFAULT_HORIZONTAL_SENSITIVITY = 2.25f;
+    static final float MIN_HORIZONTAL_SENSITIVITY = 1f;
+    static final float MAX_HORIZONTAL_SENSITIVITY = 4f;
     /**
      * the largest minimum radius: a finger's width is capped here on a small,
      * dense display, where the D-pad's buttons (69 apart) would overlap
@@ -68,10 +71,16 @@ final class TouchLayout {
     static final class Configuration {
         final TouchLayout layout;
         final float sensitivity;
+        final float horizontalSensitivity;
 
         Configuration(TouchLayout layout, float sensitivity) {
+            this(layout, sensitivity, DEFAULT_HORIZONTAL_SENSITIVITY);
+        }
+
+        Configuration(TouchLayout layout, float sensitivity, float horizontalSensitivity) {
             this.layout = layout;
             this.sensitivity = sensitivity;
+            this.horizontalSensitivity = horizontalSensitivity;
         }
     }
 
@@ -274,7 +283,11 @@ final class TouchLayout {
 
     /** the layout as a layout file's text, with the look sensitivity */
     String exportConfiguration(float sensitivity) {
-        if (!validSensitivity(sensitivity))
+        return exportConfiguration(sensitivity, DEFAULT_HORIZONTAL_SENSITIVITY);
+    }
+
+    String exportConfiguration(float sensitivity, float horizontalSensitivity) {
+        if (!validSensitivity(sensitivity) || !validHorizontalSensitivity(horizontalSensitivity))
             throw new IllegalArgumentException("Invalid sensitivity");
         Properties values = new Properties();
         values.setProperty("format", "halo-touch-layout");
@@ -285,6 +298,7 @@ final class TouchLayout {
         values.setProperty("floating-stick", Boolean.toString(floatingStick));
         values.setProperty("count", Integer.toString(size()));
         values.setProperty("sensitivity", Float.toString(sensitivity));
+        values.setProperty("horizontal-sensitivity", Float.toString(horizontalSensitivity));
         for (int i = 0; i < size(); i++) {
             String key = "control." + i + ".";
             values.setProperty(key + "type", Integer.toString(type(i)));
@@ -313,7 +327,10 @@ final class TouchLayout {
             int version = readVersion(values);
             int count = Integer.parseInt(values.getProperty("count"));
             float sensitivity = Float.parseFloat(values.getProperty("sensitivity"));
-            if (count < BASE_COUNT || count > MAX_CONTROLS || !validSensitivity(sensitivity))
+            float horizontalSensitivity = Float.parseFloat(values.getProperty("horizontal-sensitivity",
+                Float.toString(DEFAULT_HORIZONTAL_SENSITIVITY)));
+            if (count < BASE_COUNT || count > MAX_CONTROLS || !validSensitivity(sensitivity)
+                    || !validHorizontalSensitivity(horizontalSensitivity))
                 throw new IllegalArgumentException("Invalid layout settings");
             TouchLayout layout = new TouchLayout();
             layout.controls.clear();
@@ -330,7 +347,7 @@ final class TouchLayout {
             }
             for (int i = 0; i < count; i++)
                 layout.controls.add(readControl(values, i, version));
-            return new Configuration(layout, sensitivity);
+            return new Configuration(layout, sensitivity, horizontalSensitivity);
         } catch (IOException | NullPointerException e) {
             throw new IllegalArgumentException("Incomplete layout file", e);
         }
@@ -381,6 +398,10 @@ final class TouchLayout {
 
     static boolean validSensitivity(float value) {
         return Float.isFinite(value) && value >= MIN_SENSITIVITY && value <= MAX_SENSITIVITY;
+    }
+
+    static boolean validHorizontalSensitivity(float value) {
+        return Float.isFinite(value) && value >= MIN_HORIZONTAL_SENSITIVITY && value <= MAX_HORIZONTAL_SENSITIVITY;
     }
 
     static boolean validOpacity(float value) {

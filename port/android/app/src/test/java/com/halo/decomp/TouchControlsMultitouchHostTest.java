@@ -78,6 +78,7 @@ public class TouchControlsMultitouchHostTest {
         HaloActivity activity = Robolectric.buildActivity(HaloActivity.class).get();
         activity.getSharedPreferences("touch-layout-v1", 0).edit().clear().commit();
         controls = new TouchControls(activity);
+        ReflectionHelpers.setField(controls, "horizontalSensitivity", 1f);
         controls.layout(0, 0, 960, 540);
         ReflectionHelpers.setField(controls, "showing", true);
         layout = ReflectionHelpers.getField(controls, "layout");
