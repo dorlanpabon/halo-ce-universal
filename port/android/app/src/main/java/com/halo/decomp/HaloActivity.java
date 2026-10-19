@@ -5,19 +5,29 @@ import android.annotation.TargetApi;
 import android.content.Context;
 import android.content.Intent;
 import android.graphics.Insets;
+import android.graphics.Color;
 import android.net.Uri;
 import android.net.wifi.WifiManager;
 import android.os.Build;
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
 import android.view.Display;
 import android.view.InputDevice;
 import android.view.KeyEvent;
+import android.view.MotionEvent;
+import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.WindowInsets;
 import android.view.WindowInsetsController;
 import android.view.WindowManager;
 import android.widget.Toast;
+import android.widget.Button;
+import android.widget.FrameLayout;
+import android.widget.LinearLayout;
+import android.widget.ProgressBar;
+import android.widget.TextView;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
@@ -46,6 +56,15 @@ public class HaloActivity extends SDLActivity {
     private String pendingLayoutExport;
     private AlertDialog touchPauseDialog;
     private boolean activityResumed;
+    static final String CHECKPOINT_BOOT_ID = "checkpoint-boot-id";
+    private final Handler checkpointHandler = new Handler(Looper.getMainLooper());
+    private CheckpointStore checkpointStore;
+    private String checkpointRequestId;
+    private boolean checkpointRestoring, checkpointExiting;
+    private View checkpointProgress;
+    private AlertDialog checkpointErrorDialog;
+    private Thread checkpointWorker;
+    private Runnable checkpointDeadline;
 
     void restartForGraphicsProfile() {
         Intent restart = new Intent(this, ProfileRestartActivity.class);
@@ -56,6 +75,8 @@ public class HaloActivity extends SDLActivity {
 
     @Override
     public boolean dispatchKeyEvent(KeyEvent event) {
+        if (checkpointBusy())
+            return true;
         if (event.getKeyCode() == KeyEvent.KEYCODE_BACK && touchControls != null) {
             if (touchControls.isEditing()) {
                 if (event.getAction() == KeyEvent.ACTION_UP)
@@ -73,10 +94,15 @@ public class HaloActivity extends SDLActivity {
     }
 
     void showTouchPauseMenu() {
-        if (touchPauseDialog != null || touchControls == null || isFinishing() || isDestroyed())
+        if (touchPauseDialog != null || checkpointBusy() || touchControls == null || isFinishing() || isDestroyed())
             return;
+        Button save = new Button(this);
+        save.setText("Guardar y salir");
+        save.setOnClickListener(v -> startCheckpointSave());
         AlertDialog dialog = new AlertDialog.Builder(this)
             .setTitle("Pausa")
+            .setMessage("Guarda el último punto de control, no la posición exacta al salir.")
+            .setView(save)
             .setPositiveButton("Reanudar", null)
             .setNeutralButton("Ajustes de controles", (d, which) -> touchControls.showOptions())
             .setNegativeButton("Atrás", null)
@@ -93,14 +119,15 @@ public class HaloActivity extends SDLActivity {
     }
 
     private boolean touchOverlayPaused() {
-        return touchPauseDialog != null || (touchControls != null && touchControls.isEditing());
+        return touchPauseDialog != null || checkpointErrorDialog != null || checkpointExiting
+            || (touchControls != null && touchControls.isEditing());
     }
 
     private void resumeTouchGameIfReady() {
         if (!touchOverlayPaused() && activityResumed && !isFinishing() && !isDestroyed()
                 && getWindow().getDecorView().hasWindowFocus()) {
             resumeNativeThread();
-            if (touchControls != null)
+            if (touchControls != null && !checkpointBusy())
                 touchControls.startDeviceInput();
         }
     }
@@ -118,6 +145,173 @@ public class HaloActivity extends SDLActivity {
             pauseNativeThread();
         else
             resumeTouchGameIfReady();
+    }
+
+    private boolean checkpointBusy() { return checkpointRequestId != null || checkpointExiting; }
+
+    @Override
+    public boolean dispatchGenericMotionEvent(MotionEvent event) {
+        return checkpointBusy() || super.dispatchGenericMotionEvent(event);
+    }
+
+    private CheckpointStore checkpointStore() throws IOException {
+        if (checkpointStore == null)
+            checkpointStore = new CheckpointStore(getExternalFilesDir(null), name -> getAssets().open(name));
+        return checkpointStore;
+    }
+
+    void startCheckpointSave() {
+        if (checkpointBusy() || isFinishing() || isDestroyed())
+            return;
+        String id = CheckpointStore.newId();
+        beginCheckpointOperation(id, false);
+        if (touchPauseDialog != null)
+            touchPauseDialog.dismiss();
+        watchCheckpoint(id, false);
+    }
+
+    private void beginCheckpointOperation(String id, boolean restoring) {
+        checkpointRequestId = id;
+        checkpointRestoring = restoring;
+        if (touchControls != null)
+            touchControls.stopDeviceInput();
+        LinearLayout progress = new LinearLayout(this);
+        progress.setOrientation(LinearLayout.VERTICAL);
+        progress.setGravity(Gravity.CENTER);
+        progress.setBackgroundColor(Color.argb(235, 15, 23, 31));
+        progress.setClickable(true);
+        progress.setFocusable(true);
+        progress.addView(new ProgressBar(this));
+        TextView text = new TextView(this);
+        text.setTextColor(Color.WHITE);
+        text.setGravity(Gravity.CENTER);
+        text.setPadding(24, 24, 24, 24);
+        text.setText(restoring ? "Continuando desde el último punto de control…"
+            : "Guardando el último punto de control…\nLa aplicación se cerrará cuando el juego lo confirme.");
+        progress.addView(text);
+        checkpointProgress = progress;
+        // Keep the SDL window focused: a dialog would suspend the engine before it can acknowledge.
+        addContentView(progress, new FrameLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+        checkpointDeadline = () -> completeCheckpoint(id, restoring ? "restore_timeout" : "save_timeout");
+        checkpointHandler.postDelayed(checkpointDeadline, restoring ? 120000 : 15000);
+    }
+
+    private void watchCheckpoint(String id, boolean restoring) {
+        checkpointWorker = new Thread(() -> {
+            try {
+                CheckpointStore store = checkpointStore();
+                if (!restoring)
+                    store.writeRequest(id);
+                while (!Thread.currentThread().isInterrupted()) {
+                    String result = store.result(id, restoring);
+                    if (result != null) {
+                        checkpointHandler.post(() -> completeCheckpoint(id, result));
+                        return;
+                    }
+                    Thread.sleep(200);
+                }
+            } catch (InterruptedException ignored) {
+                Thread.currentThread().interrupt();
+            } catch (IOException e) {
+                if (!Thread.currentThread().isInterrupted())
+                    checkpointHandler.post(() -> completeCheckpoint(id, "io_error"));
+            }
+        }, restoring ? "checkpoint restore" : "checkpoint save");
+        checkpointWorker.start();
+    }
+
+    void completeCheckpoint(String id, String result) {
+        if (!id.equals(checkpointRequestId) || isFinishing() || isDestroyed())
+            return;
+        boolean restoring = checkpointRestoring;
+        stopCheckpointWatch();
+        checkpointRequestId = null;
+        if ((!restoring && result.equals("saved")) || (restoring && result.equals("resumed"))) {
+            if (restoring) {
+                removeCheckpointProgress();
+                resumeTouchGameIfReady();
+            } else {
+                checkpointExiting = true;
+                exitCheckpointGame();
+            }
+            return;
+        }
+        // A timeout or stale response must never close the game later.
+        CheckpointStore store = checkpointStore;
+        if (!restoring && store != null)
+            new Thread(() -> {
+                try { store.cancelRequest(id); }
+                catch (IOException ignored) { }
+            }, "cancel checkpoint request").start();
+        String message;
+        switch (result) {
+            case "no_checkpoint":
+                message = "Todavía no hay un punto de control. Avanza hasta que el juego guarde uno y vuelve a intentarlo.";
+                break;
+            case "unsupported":
+                message = "Esta partida no admite el guardado. Solo se guarda la campaña individual con un punto de control.";
+                break;
+            case "corrupt":
+                message = "El guardado está dañado o no pasó la comprobación. El archivo se conserva.";
+                break;
+            case "incompatible":
+                message = "El guardado corresponde a otra versión o motor gráfico. El archivo se conserva; usa la misma APK y configuración gráfica.";
+                break;
+            case "save_timeout":
+                message = "El juego no confirmó el guardado a tiempo. No se cerró la partida.";
+                break;
+            case "restore_timeout":
+                message = "El juego no confirmó la continuación a tiempo. Tu archivo guardado se conserva.";
+                break;
+            default:
+                message = restoring ? "No se pudo leer el punto de control. Tu archivo guardado se conserva."
+                    : "No se pudo escribir el punto de control. La partida sigue abierta.";
+                break;
+        }
+        AlertDialog error = new AlertDialog.Builder(this)
+            .setTitle(restoring ? "No se pudo continuar" : "No se pudo guardar")
+            .setMessage(message)
+            .setPositiveButton(restoring ? "Salir" : "Volver a pausa", null).create();
+        checkpointErrorDialog = error;
+        pauseNativeThread();
+        removeCheckpointProgress();
+        error.setCanceledOnTouchOutside(false);
+        error.setOnDismissListener(d -> {
+            checkpointErrorDialog = null;
+            if (!isFinishing() && !isDestroyed()) {
+                if (restoring) {
+                    checkpointExiting = true;
+                    exitCheckpointGame();
+                } else {
+                    showTouchPauseMenu();
+                }
+            }
+        });
+        error.show();
+    }
+
+    private void removeCheckpointProgress() {
+        if (checkpointProgress != null && checkpointProgress.getParent() instanceof ViewGroup)
+            ((ViewGroup) checkpointProgress.getParent()).removeView(checkpointProgress);
+        checkpointProgress = null;
+    }
+
+    private void stopCheckpointWatch() {
+        if (checkpointDeadline != null)
+            checkpointHandler.removeCallbacks(checkpointDeadline);
+        checkpointDeadline = null;
+        if (checkpointWorker != null)
+            checkpointWorker.interrupt();
+        checkpointWorker = null;
+    }
+
+    void exitCheckpointGame() {
+        Intent exit = new Intent(this, ProfileRestartActivity.class);
+        exit.putExtra("game-pid", android.os.Process.myPid());
+        exit.putExtra("exit-only", true);
+        startActivity(exit);
+        finishAndRemoveTask();
     }
 
     @Override
@@ -140,6 +334,11 @@ public class HaloActivity extends SDLActivity {
         preferHighestRefreshRate();
         trackGestureInsets();
         acquireMulticastLock();
+        String bootId = getIntent().getStringExtra(CHECKPOINT_BOOT_ID);
+        if (bootId != null && bootId.matches("[0-9a-f]{32}")) {
+            beginCheckpointOperation(bootId, true);
+            watchCheckpoint(bootId, true);
+        }
         // a new version looked for while the game starts
         Updater.start(this);
     }
@@ -256,7 +455,8 @@ public class HaloActivity extends SDLActivity {
         super.onResume();
         if (touchOverlayPaused())
             pauseNativeThread();
-        if (!touchOverlayPaused() && touchControls != null && getWindow().getDecorView().hasWindowFocus())
+        if (!touchOverlayPaused() && !checkpointBusy() && touchControls != null
+                && getWindow().getDecorView().hasWindowFocus())
             touchControls.startDeviceInput();
     }
 
@@ -271,7 +471,7 @@ public class HaloActivity extends SDLActivity {
     @Override
     public void onWindowFocusChanged(boolean hasFocus) {
         if (touchControls != null) {
-            if (hasFocus && !touchOverlayPaused())
+            if (hasFocus && !touchOverlayPaused() && !checkpointBusy())
                 touchControls.startDeviceInput();
             else
                 touchControls.stopDeviceInput();
@@ -290,6 +490,8 @@ public class HaloActivity extends SDLActivity {
 
     @Override
     protected void onDestroy() {
+        checkpointRequestId = null;
+        stopCheckpointWatch();
         if (touchControls != null)
             touchControls.stopDeviceInput();
         if (multicastLock != null && multicastLock.isHeld())

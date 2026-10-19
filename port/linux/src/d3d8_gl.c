@@ -27,6 +27,7 @@ Conventions carried over from the Xbox:
 #include "halo_ui_pointer.h"
 #include "port_config.h"
 #include "main/console.h"
+#include "android_checkpoint.h"
 
 #include <SDL3/SDL.h>
 
@@ -35,6 +36,13 @@ Conventions carried over from the Xbox:
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+
+#ifdef HALO_ANDROID
+int android_checkpoint_renderer(void)
+{
+	return 0;
+}
+#endif
 
 /* whether two copies of a state are the same, compared a word at a time: the
 guest's C library (musl) compares a byte at a time, and every draw compares
