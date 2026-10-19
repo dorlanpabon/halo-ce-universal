@@ -1173,6 +1173,17 @@ public final class TouchControls extends View implements SensorEventListener, In
         });
         panel.addView(floating);
 
+        Switch leftFire = new Switch(getContext());
+        leftFire.setText("Disparo izquierdo");
+        leftFire.setChecked(layout.shown(TouchLayout.FIRE_LEFT));
+        leftFire.setOnCheckedChangeListener((view, enabled) -> {
+            reset();
+            layout.setShown(TouchLayout.FIRE_LEFT, enabled);
+            saveLayout();
+            invalidate();
+        });
+        panel.addView(leftFire);
+
         TextView opacityLabel = text("");
         SeekBar opacity = new SeekBar(getContext());
         int steps = Math.round((TouchLayout.MAX_OPACITY - TouchLayout.MIN_OPACITY) * 20);
@@ -1204,9 +1215,11 @@ public final class TouchControls extends View implements SensorEventListener, In
         panel.addView(opacityLabel);
         panel.addView(opacity);
 
+        ScrollView scroll = new ScrollView(getContext());
+        scroll.addView(panel);
         AlertDialog dialog = new AlertDialog.Builder(getContext())
             .setTitle("General")
-            .setView(panel)
+            .setView(scroll)
             .setPositiveButton("Done", null)
             .create();
         panel.addView(button("Hide or add buttons", view -> {

@@ -21,15 +21,25 @@ final class TouchPresets {
         {790, 470}, {900, 265}, {105, 205}, {220, 205}, {576, 68}, {390, 68},
         {100, 237}, {100, 335}, {51, 286}, {149, 286}, {130, 420}, {310, 300}
     };
-    private static final float[][] PLACES = {
+    private static final float[][] PREVIOUS_PLACES = {
         {900, 430}, {900, 330}, {812, 146}, {900, 146}, {780, 350}, {700, 450},
         {800, 480}, {900, 236}, {526, 480}, {612, 480}, {576, 68}, {390, 68},
         {100, 237}, {100, 335}, {51, 286}, {149, 286}, {130, 420}, {145, 110}
     };
-    private static final float[] SIZES = {
+    private static final float[][] PLACES = {
+        {900, 432}, {900, 342}, {812, 162}, {900, 162}, {780, 342}, {700, 480},
+        {800, 480}, {900, 252}, {526, 480}, {612, 480}, {576, 68}, {390, 68},
+        {100, 237}, {100, 335}, {51, 286}, {149, 286}, {130, 420}, {200, 230}
+    };
+    private static final float[] OLD_SIZES = {
         1, 34f / 32, 1, 34f / 32, 1.35f, 1, 34f / 32, 34f / 32,
         34f / 27, 34f / 29, 34f / 28, 34f / 28,
         34f / 25, 34f / 25, 34f / 25, 34f / 25, 1, 1.35f
+    };
+    private static final float[] SIZES = {
+        34f / 36, 34f / 32, 1, 34f / 32, 48f / 39, 34f / 35, 34f / 32, 34f / 32,
+        34f / 27, 34f / 29, 34f / 28, 34f / 28,
+        34f / 25, 34f / 25, 34f / 25, 34f / 25, 1, 44f / 39
     };
 
     private TouchPresets() {
@@ -47,12 +57,12 @@ final class TouchPresets {
         return new TouchLayout().exportConfiguration(1f);
     }
 
-    /** Restore preset positions without replacing a hand-positioned HUD or its settings. */
+    /** Align preset controls without replacing a hand-positioned HUD or its settings. */
     static String upgradeMobileLayout(String configuration) {
         TouchLayout.Configuration saved = TouchLayout.importConfiguration(configuration);
         if (saved.layout.size() != LEGACY_PLACES.length)
             return configuration;
-        boolean legacy = true, redistributed = true;
+        boolean legacy = true, redistributed = true, previous = true;
         for (int i = 0; i < LEGACY_PLACES.length; i++) {
             if (saved.layout.type(i) != i)
                 return configuration;
@@ -60,13 +70,18 @@ final class TouchPresets {
                 && Math.abs(saved.layout.savedY(i) - LEGACY_PLACES[i][1]) <= 0.1f;
             redistributed &= Math.abs(saved.layout.savedX(i) - REDISTRIBUTED_PLACES[i][0]) <= 0.1f
                 && Math.abs(saved.layout.savedY(i) - REDISTRIBUTED_PLACES[i][1]) <= 0.1f;
+            previous &= Math.abs(saved.layout.savedX(i) - PREVIOUS_PLACES[i][0]) <= 0.1f
+                && Math.abs(saved.layout.savedY(i) - PREVIOUS_PLACES[i][1]) <= 0.1f;
         }
-        if (!legacy && !redistributed)
+        if (!legacy && !redistributed && !previous)
             return configuration;
         for (int i = 0; i < PLACES.length; i++) {
             if (Math.abs(saved.layout.savedX(i) - PLACES[i][0]) > 0.1f
                     || Math.abs(saved.layout.savedY(i) - PLACES[i][1]) > 0.1f)
                 saved.layout.move(i, PLACES[i][0], PLACES[i][1]);
+            if (Float.compare(saved.layout.sizeScale(i), OLD_SIZES[i]) == 0
+                    && Float.compare(SIZES[i], OLD_SIZES[i]) != 0)
+                saved.layout.setSize(i, SIZES[i]);
         }
         return saved.layout.exportConfiguration(saved.sensitivity, saved.horizontalSensitivity);
     }
