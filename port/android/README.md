@@ -256,6 +256,12 @@ gyroscope aims while the touch controls show.
     Guardar persists the value with the current HUD; Cancelar discards the draft
     and Restablecer selects 1x in the draft. Zoom and aim assistance remain the
     game's own. Resolution and the layout file format are unchanged.
+    Giro horizontal has Clásico (1x), Ágil (2.25x, the default) and Amplio (4x)
+    independently of the vertical response. The preview applies the same gain.
+    Motion remains proportional to distance, without acceleration or inertia;
+    historical touch samples and the last displacement on release are retained.
+    The optional horizontal-sensitivity field travels with each HUD in format 4;
+    layouts without it use Ágil, and older readers can ignore the extra field.
   - "Exportar HUD" and "Importar HUD". Files use
     layout version 4 for per-button opacity; versions 1 through 3 still load.
 

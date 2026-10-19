@@ -177,6 +177,7 @@ public final class TouchControls extends View implements SensorEventListener, In
 
     private TouchLayout layout = new TouchLayout();
     private float sensitivity = 1f;
+    private float horizontalSensitivity = TouchLayout.DEFAULT_HORIZONTAL_SENSITIVITY;
     /** the controls removed by the toolbar's Hide, until its Touch */
     private boolean hidden;
     private boolean editing;
@@ -317,6 +318,7 @@ public final class TouchControls extends View implements SensorEventListener, In
             TouchLayout.Configuration saved = TouchLayout.importConfiguration(TouchPresets.upgradeMobileLayout(configuration));
             layout = saved.layout;
             sensitivity = saved.sensitivity;
+            horizontalSensitivity = saved.horizontalSensitivity;
         } catch (IllegalArgumentException e) {
             Toast.makeText(context, "The saved touch layout could not be read. Using the default one.",
                 Toast.LENGTH_LONG).show();
@@ -686,11 +688,17 @@ public final class TouchControls extends View implements SensorEventListener, In
                 fingerDown(id, event.getX(index), event.getY(index));
                 break;
             case MotionEvent.ACTION_MOVE:
+                for (int h = 0; h < event.getHistorySize(); h++)
+                    for (int i = 0; i < event.getPointerCount(); i++)
+                        fingerMoved(event.getPointerId(i), event.getHistoricalX(i, h), event.getHistoricalY(i, h));
                 for (int i = 0; i < event.getPointerCount(); i++)
                     fingerMoved(event.getPointerId(i), event.getX(i), event.getY(i));
                 break;
             case MotionEvent.ACTION_UP:
             case MotionEvent.ACTION_POINTER_UP:
+                // The lift can contain the last displacement even without a preceding MOVE.
+                if (id == lookPointer)
+                    fingerMoved(id, event.getX(index), event.getY(index));
                 fingerUp(id, event.getX(index), event.getY(index));
                 break;
             case MotionEvent.ACTION_CANCEL:
@@ -773,7 +781,10 @@ public final class TouchControls extends View implements SensorEventListener, In
             lookY = origin[1];
         }
         if (id == lookPointer) {
-            nativeLook(logical(px - lookX) * sensitivity, logical(py - lookY) * sensitivity);
+            float dx = logical(px - lookX) * sensitivity * horizontalSensitivity;
+            float dy = logical(py - lookY) * sensitivity;
+            if (dx != 0 || dy != 0)
+                nativeLook(dx, dy);
             lookX = px;
             lookY = py;
         }
@@ -908,7 +919,7 @@ public final class TouchControls extends View implements SensorEventListener, In
     }
 
     public String exportLayout() {
-        return layout.exportConfiguration(sensitivity);
+        return layout.exportConfiguration(sensitivity, horizontalSensitivity);
     }
 
     /** replaces the layout with a layout file's (saved first: it throws if the file is not valid) */
@@ -916,7 +927,7 @@ public final class TouchControls extends View implements SensorEventListener, In
         TouchLayout.Configuration imported = TouchLayout.importConfiguration(text);
         imported.layout.bounds(logicalWidth, logicalHeight);
         imported.layout.setMinimumRadius(minimumRadius());
-        String normalized = imported.layout.exportConfiguration(imported.sensitivity);
+        String normalized = imported.layout.exportConfiguration(imported.sensitivity, imported.horizontalSensitivity);
         if (!preferences.edit().putString(KEY_CONFIGURATION, normalized)
                 .putString("hud-layout-" + activeHud, normalized).commit())
             throw new IllegalArgumentException("Could not save the imported layout");
@@ -924,6 +935,7 @@ public final class TouchControls extends View implements SensorEventListener, In
         layout = imported.layout;
         updateSafeBounds();
         sensitivity = imported.sensitivity;
+        horizontalSensitivity = imported.horizontalSensitivity;
         setHidden(false);
         cancelRumble();
         invalidate();
@@ -1031,6 +1043,7 @@ public final class TouchControls extends View implements SensorEventListener, In
         reset();
         layout = saved.layout;
         sensitivity = saved.sensitivity;
+        horizontalSensitivity = saved.horizontalSensitivity;
         layout.bounds(logicalWidth, logicalHeight);
         layout.setMinimumRadius(minimumRadius());
         updateSafeBounds();
@@ -1350,7 +1363,7 @@ public final class TouchControls extends View implements SensorEventListener, In
     }
 
     private void showSensitivity() {
-        LookSensitivityPanel panel = new LookSensitivityPanel(getContext(), sensitivity, logical(1));
+        LookSensitivityPanel panel = new LookSensitivityPanel(getContext(), sensitivity, horizontalSensitivity, logical(1));
         AlertDialog dialog = new AlertDialog.Builder(getContext())
             .setTitle("Sensibilidad al mirar")
             .setView(panel)
@@ -1359,14 +1372,21 @@ public final class TouchControls extends View implements SensorEventListener, In
             .setPositiveButton("Guardar", null)
             .create();
         dialog.setOnShowListener(d -> {
-            dialog.getButton(AlertDialog.BUTTON_NEUTRAL).setOnClickListener(view -> panel.setValue(1f));
+            dialog.getButton(AlertDialog.BUTTON_NEUTRAL).setOnClickListener(view -> {
+                panel.setValue(1f);
+                panel.setHorizontalValue(TouchLayout.DEFAULT_HORIZONTAL_SENSITIVITY);
+            });
             dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(view -> {
                 float previous = sensitivity;
+                float previousHorizontal = horizontalSensitivity;
                 sensitivity = panel.value();
+                horizontalSensitivity = panel.horizontalValue();
                 if (saveLayout())
                     dialog.dismiss();
-                else
+                else {
                     sensitivity = previous;
+                    horizontalSensitivity = previousHorizontal;
+                }
             });
         });
         openDialog(dialog);
