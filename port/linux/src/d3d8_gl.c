@@ -200,6 +200,7 @@ static void screen_mode_choose(long *width, float scale[2])
 	/* display.screen_width, or 0 for the display's shape, which the app
 	passes (port/android/host/host_main.c) */
 	const char *display = getenv("HALO_DISPLAY_WIDTH");
+	double render_scale = config_real("display.render_scale");
 
 	*width = config_integer("display.screen_width");
 	if (*width <= 0)
@@ -209,8 +210,14 @@ static void screen_mode_choose(long *width, float scale[2])
 	if (*width > 1600)
 		*width = 1600;
 	*width &= ~1L;
-	/* (display.resolution_limit's lines, the screen's at most: sdl_platform.c) */
-	scale[0] = scale[1] = platform_resolution_scale();
+	if (!isfinite(render_scale))
+		render_scale = 1.0;
+	if (render_scale < 0.5)
+		render_scale = 0.5;
+	if (render_scale > 1.0)
+		render_scale = 1.0;
+	/* Keep display.resolution_limit's native/high-resolution selection. */
+	scale[0] = scale[1] = platform_resolution_scale() * (float)render_scale;
 	screen_supersampling = 1.0f;
 #else
 	long display_width, display_height;
@@ -944,14 +951,14 @@ static struct
 	float attribute_values[XGPU_VERTEX_ATTRIBUTE_COUNT][4];
 } gl_state;
 
-#ifdef HALO_WEB
+#if defined(HALO_WEB) || defined(HALO_ANDROID)
 static void vertex_array_cache_invalidate(void);
 #endif
 
 void xgpu_gl_state_invalidate(void)
 {
 	memset(&gl_state, 0xff, sizeof(gl_state));
-#ifdef HALO_WEB
+#if defined(HALO_WEB) || defined(HALO_ANDROID)
 	vertex_array_cache_invalidate();
 #endif
 }
@@ -5195,16 +5202,17 @@ static BOOL stream_has_colors(const struct vertex_shader_object *declaration, un
 }
 #endif
 
-#ifdef HALO_WEB
-/* Each draw's attributes would be pointed again (a call into the browser
+#if defined(HALO_WEB) || defined(HALO_ANDROID)
+/* Each draw's attributes would be pointed again (a driver call
 for each) whenever it reads its streams from another place than the draw
 before it, which is nearly always. The draws whose streams all come from
 the mirror read the same places frame after frame (a model's part, the
 structure's), so each such set of places has a vertex array of its own,
 made the first time, and the draw binds it: one call. Other draws use the
 device's own vertex array, pointed as before. A vertex array holds the
-element array buffer's binding too, kept here for each. Past
-VERTEX_ARRAY_CACHE_MAXIMUM, they are all deleted and made again. */
+element array buffer's binding too, kept here for each. At
+VERTEX_ARRAY_CACHE_MAXIMUM, Web deletes them and starts again; Android keeps
+the existing entries and points new layouts with the device's vertex array. */
 #define VERTEX_ARRAY_CACHE_SLOTS 8192
 #define VERTEX_ARRAY_CACHE_MAXIMUM 4096
 
@@ -5268,6 +5276,7 @@ static void vertex_array_cache_bind(struct vertex_array_cache_entry *entry)
 		entry->element_epoch == vertex_array_cache.element_epoch ? entry->element_array_buffer : (GLuint)-1;
 }
 
+#ifdef HALO_WEB
 static void vertex_array_cache_clear(void)
 {
 	unsigned long slot;
@@ -5286,6 +5295,7 @@ static void vertex_array_cache_clear(void)
 	}
 	vertex_array_cache.count = 0;
 }
+#endif
 
 /* binds the vertex array of the declaration reading its streams (streams,
 a bit each) from buffers at offsets; FALSE if there is none and none can be
@@ -5333,8 +5343,14 @@ static BOOL vertex_array_cache_use(const struct vertex_shader_object *declaratio
 	{
 		if (vertex_array_cache.count >= VERTEX_ARRAY_CACHE_MAXIMUM)
 		{
+#ifdef HALO_ANDROID
+			/* The Android host exposes no glDeleteVertexArrays import. Keep
+			existing entries bounded and draw new layouts with the device VAO. */
+			return FALSE;
+#else
 			vertex_array_cache_clear();
 			return vertex_array_cache_use(declaration, streams, buffers, offsets);
+#endif
 		}
 		entry = calloc(1, sizeof(*entry));
 		if (!entry)
@@ -5351,6 +5367,11 @@ static BOOL vertex_array_cache_use(const struct vertex_shader_object *declaratio
 			}
 		}
 		glGenVertexArrays(1, &entry->vertex_array);
+		if (!entry->vertex_array)
+		{
+			free(entry);
+			return FALSE;
+		}
 		entry->element_array_buffer = 0;
 		entry->element_epoch = vertex_array_cache.element_epoch;
 		vertex_array_cache.slots[slot] = entry;
@@ -5425,7 +5446,7 @@ static void setup_streams(unsigned long first, unsigned long count)
 		stream_buffers[stream] = 0;
 		total += (bytes + 15) & ~15UL;
 	}
-#ifdef HALO_WEB
+#if defined(HALO_WEB) || defined(HALO_ANDROID)
 	{
 		/* every stream from the mirror: a vertex array of their own
 		(vertex_array_cache) */
@@ -5903,7 +5924,7 @@ void WINAPI D3DDevice_End(void)
 			fixed_function_transform(device.immediate_vertices + index * XGPU_VERTEX_ATTRIBUTE_COUNT * 4);
 	}
 	trace_draw("immediate", type, count, device.immediate_vertices);
-#ifdef HALO_WEB
+#if defined(HALO_WEB) || defined(HALO_ANDROID)
 	vertex_array_cache_bind(NULL);
 #endif
 	{

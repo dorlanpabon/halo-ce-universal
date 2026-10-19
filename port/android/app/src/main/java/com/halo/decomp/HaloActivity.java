@@ -10,6 +10,8 @@ import android.net.wifi.WifiManager;
 import android.os.Build;
 import android.os.Bundle;
 import android.view.Display;
+import android.view.InputDevice;
+import android.view.KeyEvent;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.WindowInsets;
@@ -42,6 +44,81 @@ public class HaloActivity extends SDLActivity {
     private TouchControls touchControls;
     private static final int EXPORT_LAYOUT = 401, IMPORT_LAYOUT = 402;
     private String pendingLayoutExport;
+    private AlertDialog touchPauseDialog;
+    private boolean activityResumed;
+
+    void restartForGraphicsProfile() {
+        Intent restart = new Intent(this, ProfileRestartActivity.class);
+        restart.putExtra("game-pid", android.os.Process.myPid());
+        startActivity(restart);
+        finishAndRemoveTask();
+    }
+
+    @Override
+    public boolean dispatchKeyEvent(KeyEvent event) {
+        if (event.getKeyCode() == KeyEvent.KEYCODE_BACK && touchControls != null) {
+            if (touchControls.isEditing()) {
+                if (event.getAction() == KeyEvent.ACTION_UP)
+                    touchControls.cancelEditor();
+                return true;
+            }
+            if (touchControls.isGameplayVisible() && !event.isFromSource(InputDevice.SOURCE_GAMEPAD)
+                    && !event.isFromSource(InputDevice.SOURCE_JOYSTICK)) {
+                if (event.getAction() == KeyEvent.ACTION_UP && !event.isCanceled())
+                    showTouchPauseMenu();
+                return true;
+            }
+        }
+        return super.dispatchKeyEvent(event);
+    }
+
+    void showTouchPauseMenu() {
+        if (touchPauseDialog != null || touchControls == null || isFinishing() || isDestroyed())
+            return;
+        AlertDialog dialog = new AlertDialog.Builder(this)
+            .setTitle("Pausa")
+            .setPositiveButton("Reanudar", null)
+            .setNeutralButton("Ajustes de controles", (d, which) -> touchControls.showOptions())
+            .setNegativeButton("Atrás", null)
+            .create();
+        touchPauseDialog = dialog;
+        touchControls.stopDeviceInput();
+        pauseNativeThread();
+        dialog.setCanceledOnTouchOutside(false);
+        dialog.setOnDismissListener(d -> {
+            touchPauseDialog = null;
+            resumeTouchGameIfReady();
+        });
+        dialog.show();
+    }
+
+    private boolean touchOverlayPaused() {
+        return touchPauseDialog != null || (touchControls != null && touchControls.isEditing());
+    }
+
+    private void resumeTouchGameIfReady() {
+        if (!touchOverlayPaused() && activityResumed && !isFinishing() && !isDestroyed()
+                && getWindow().getDecorView().hasWindowFocus()) {
+            resumeNativeThread();
+            if (touchControls != null)
+                touchControls.startDeviceInput();
+        }
+    }
+
+    @Override
+    protected void resumeNativeThread() {
+        if (touchOverlayPaused())
+            super.pauseNativeThread();
+        else
+            super.resumeNativeThread();
+    }
+
+    void setHudEditorPaused(boolean paused) {
+        if (paused || touchPauseDialog != null)
+            pauseNativeThread();
+        else
+            resumeTouchGameIfReady();
+    }
 
     @Override
     protected String[] getLibraries() {
@@ -175,13 +252,17 @@ public class HaloActivity extends SDLActivity {
 
     @Override
     protected void onResume() {
+        activityResumed = true;
         super.onResume();
-        if (touchControls != null && getWindow().getDecorView().hasWindowFocus())
+        if (touchOverlayPaused())
+            pauseNativeThread();
+        if (!touchOverlayPaused() && touchControls != null && getWindow().getDecorView().hasWindowFocus())
             touchControls.startDeviceInput();
     }
 
     @Override
     protected void onPause() {
+        activityResumed = false;
         if (touchControls != null)
             touchControls.stopDeviceInput();
         super.onPause();
@@ -190,12 +271,18 @@ public class HaloActivity extends SDLActivity {
     @Override
     public void onWindowFocusChanged(boolean hasFocus) {
         if (touchControls != null) {
-            if (hasFocus)
+            if (hasFocus && !touchOverlayPaused())
                 touchControls.startDeviceInput();
             else
                 touchControls.stopDeviceInput();
         }
         super.onWindowFocusChanged(hasFocus);
+        if (hasFocus) {
+            if (touchOverlayPaused())
+                pauseNativeThread();
+            else
+                resumeTouchGameIfReady();
+        }
         // the system bars come back after a swipe or after the launcher was over them
         if (hasFocus)
             hideSystemBars();
