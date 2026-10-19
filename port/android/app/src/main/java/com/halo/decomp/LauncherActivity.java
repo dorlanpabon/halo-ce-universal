@@ -1,6 +1,8 @@
 package com.halo.decomp;
 
 import android.app.Activity;
+import android.app.ActivityManager;
+import android.app.AlertDialog;
 import android.content.Intent;
 import android.graphics.Color;
 import android.net.Uri;
@@ -47,6 +49,9 @@ public class LauncherActivity extends Activity {
     private ProgressBar progress;
     private Button pick;
     private final Handler handler = new Handler(Looper.getMainLooper());
+    private CheckpointStore checkpointStore;
+    private boolean checkpointChoiceStarted, checkpointPreparing;
+    private Thread checkpointWorker;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -124,12 +129,141 @@ public class LauncherActivity extends Activity {
 
     private boolean gameStarted;
 
-    private void startGame() {
-        if (gameStarted)
+    void startGame() {
+        if (gameStarted || checkpointChoiceStarted || isFinishing() || isDestroyed())
+            return;
+        if (hasRunningGame()) {
+            launchGame(null);
+            return;
+        }
+        checkpointChoiceStarted = true;
+        boolean invite = Intent.ACTION_VIEW.equals(getIntent().getAction()) && getIntent().getData() != null;
+        checkpointWorker = new Thread(() -> {
+            try {
+                CheckpointStore store = checkpointStore();
+                // A request abandoned before the engine started must not be replayed on a later launch.
+                store.clearAbandonedRequests();
+                CheckpointStore.Candidate candidate = invite ? null : store.inspect();
+                handler.post(() -> {
+                    if (isFinishing() || isDestroyed())
+                        return;
+                    if (candidate == null || candidate.kind == CheckpointStore.Kind.ABSENT)
+                        launchGame(null);
+                    else
+                        showCheckpointChoice(candidate);
+                });
+            } catch (java.io.IOException e) {
+                handler.post(() -> checkpointLaunchError(null));
+            }
+        }, "checkpoint startup");
+        checkpointWorker.start();
+    }
+
+    private CheckpointStore checkpointStore() throws java.io.IOException {
+        if (checkpointStore == null)
+            checkpointStore = new CheckpointStore(dataRoot, name -> getAssets().open(name));
+        return checkpointStore;
+    }
+
+    boolean hasRunningGame() {
+        ActivityManager manager = (ActivityManager) getSystemService(ACTIVITY_SERVICE);
+        if (manager == null)
+            return false;
+        try {
+            boolean running = false;
+            java.util.List<ActivityManager.RunningAppProcessInfo> processes = manager.getRunningAppProcesses();
+            if (processes != null)
+                for (ActivityManager.RunningAppProcessInfo process : processes)
+                    running |= process.uid == android.os.Process.myUid()
+                        && process.processName.equals(getPackageName() + ":game");
+            if (running)
+                for (ActivityManager.AppTask task : manager.getAppTasks()) {
+                    ActivityManager.RecentTaskInfo info = task.getTaskInfo();
+                    android.content.ComponentName component = info.baseIntent.getComponent();
+                    if (info.numActivities > 0 && component != null
+                            && component.getClassName().equals(HaloActivity.class.getName()))
+                        return true;
+                }
+        } catch (SecurityException ignored) { }
+        return false;
+    }
+
+    void showCheckpointChoice(CheckpointStore.Candidate candidate) {
+        if (isFinishing() || isDestroyed())
+            return;
+        String message = candidate.kind == CheckpointStore.Kind.READY
+            ? "Puedes continuar desde el último punto de control. Nueva partida conserva ese guardado hasta que guardes otro."
+            : candidate.kind == CheckpointStore.Kind.INCOMPATIBLE
+                ? "El guardado pertenece a otra versión del juego. Se conserva, pero esta APK no puede continuarlo."
+                : "El archivo de guardado está incompleto o dañado. Se conserva y no se cargará.";
+        AlertDialog dialog = new AlertDialog.Builder(this)
+            .setTitle("Partida guardada")
+            .setMessage(message)
+            .setPositiveButton("Continuar", (d, which) -> prepareCheckpointBoot(candidate, true))
+            .setNeutralButton("Nueva partida", (d, which) -> prepareCheckpointBoot(candidate, false))
+            .setNegativeButton("Cancelar", (d, which) -> finish())
+            .create();
+        dialog.setCanceledOnTouchOutside(false);
+        dialog.setOnCancelListener(d -> finish());
+        dialog.show();
+        dialog.getButton(AlertDialog.BUTTON_POSITIVE).setEnabled(candidate.kind == CheckpointStore.Kind.READY);
+    }
+
+    private void prepareCheckpointBoot(CheckpointStore.Candidate candidate, boolean resume) {
+        if (checkpointPreparing || gameStarted || isFinishing() || isDestroyed())
+            return;
+        checkpointPreparing = true;
+        AlertDialog preparing = new AlertDialog.Builder(this)
+            .setMessage("Preparando la partida…").setCancelable(false).create();
+        preparing.show();
+        String id = CheckpointStore.newId();
+        checkpointWorker = new Thread(() -> {
+            try {
+                checkpointStore().writeBoot(id, resume);
+                handler.post(() -> {
+                    if (isFinishing() || isDestroyed())
+                        return;
+                    preparing.dismiss();
+                    launchGame(resume ? id : null);
+                });
+            } catch (java.io.IOException e) {
+                handler.post(() -> {
+                    preparing.dismiss();
+                    checkpointPreparing = false;
+                    checkpointLaunchError(candidate);
+                });
+            }
+        }, "checkpoint boot request");
+        checkpointWorker.start();
+    }
+
+    private void checkpointLaunchError(CheckpointStore.Candidate candidate) {
+        if (isFinishing() || isDestroyed())
+            return;
+        AlertDialog.Builder dialog = new AlertDialog.Builder(this).setTitle("Guardado no disponible")
+            .setMessage("No se pudo preparar la partida. Tu archivo guardado se conserva.")
+            .setNegativeButton("Salir", (d, which) -> finish());
+        if (candidate != null)
+            dialog.setPositiveButton("Volver", (d, which) -> showCheckpointChoice(candidate));
+        dialog.show().setOnCancelListener(d -> finish());
+    }
+
+    private void launchGame(String bootId) {
+        if (gameStarted || isFinishing() || isDestroyed())
             return;
         gameStarted = true;
-        startActivity(new Intent(this, HaloActivity.class));
+        Intent game = new Intent(this, HaloActivity.class);
+        if (bootId != null)
+            game.putExtra(HaloActivity.CHECKPOINT_BOOT_ID, bootId);
+        startActivity(game);
         finish();
+    }
+
+    @Override
+    protected void onDestroy() {
+        if (checkpointWorker != null)
+            checkpointWorker.interrupt();
+        super.onDestroy();
     }
 
     /* ---------- the Vulkan driver, before the game */
