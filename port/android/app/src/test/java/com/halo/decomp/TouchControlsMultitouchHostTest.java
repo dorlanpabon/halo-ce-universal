@@ -5,6 +5,8 @@ import android.app.AlertDialog;
 import android.graphics.Bitmap;
 import android.graphics.Canvas;
 import android.os.SystemClock;
+import android.os.Looper;
+import android.util.SparseIntArray;
 import android.view.InputDevice;
 import android.view.MotionEvent;
 import android.view.View;
@@ -405,17 +407,262 @@ public class TouchControlsMultitouchHostTest {
         assertEquals(-1, (int) ReflectionHelpers.getField(controls, "lookPointer"));
     }
 
+    @Test public void sustainedForwardLocksAt600MillisecondsWithoutAnotherMove() {
+        holdForward(11);
+        advance(599);
+        assertFalse(autoWalkLocked());
+        advance(1);
+        assertTrue("The timer works while the thumb is stationary", autoWalkLocked());
+        assertEquals(0, NativeSink.state[0]);
+        assertEquals(-32767, NativeSink.state[1]);
+        controls.reset();
+    }
+
+    @Test public void liftingForwardAfterLockKeepsWalkingWithoutInventingAFinger() {
+        holdForward(11);
+        advance(600);
+        event(MotionEvent.ACTION_UP, forward(11));
+        assertTrue(autoWalkLocked());
+        assertEquals(-32767, NativeSink.state[1]);
+        assertEquals(0, ((SparseIntArray) ReflectionHelpers.getField(controls, "owners")).size());
+        assertEquals(-1, (int) ReflectionHelpers.getField(controls, "lookPointer"));
+        assertFalse("A lock is not a held joystick",
+            (boolean) ReflectionHelpers.callInstanceMethod(controls, "held",
+                ReflectionHelpers.ClassParameter.from(int.class, TouchLayout.LEFT)));
+        advance(1000);
+        assertEquals(-32767, NativeSink.state[1]);
+        controls.reset();
+    }
+
+    @Test public void releasingBeforeThresholdNeverLocksFromTheOldTimer() {
+        holdForward(11);
+        advance(599);
+        event(MotionEvent.ACTION_UP, forward(11));
+        advance(1);
+        assertFalse(autoWalkLocked());
+        assertReleased();
+        advance(1000);
+        assertReleased();
+    }
+
+    @Test public void partialForwardOrWideDiagonalNeverStartsTheLock() {
+        float sx = layout.x(TouchLayout.LEFT), sy = layout.y(TouchLayout.LEFT);
+        float radius = layout.radius(TouchLayout.LEFT);
+        for (float[] direction : new float[][] {{0, -.89f}, {.26f, -.95f}, {-.26f, -.95f}}) {
+            event(MotionEvent.ACTION_DOWN, point(11, sx, sy));
+            event(MotionEvent.ACTION_MOVE, point(11, sx + direction[0] * radius, sy + direction[1] * radius));
+            advance(1000);
+            assertFalse("Only the full forward cone can latch", autoWalkLocked());
+            event(MotionEvent.ACTION_UP, point(11, sx + direction[0] * radius, sy + direction[1] * radius));
+            assertReleased();
+        }
+    }
+
+    @Test public void leavingForwardConeBeforeThresholdRestartsTheDwell() {
+        holdForward(11);
+        advance(500);
+        float sx = layout.x(TouchLayout.LEFT), sy = layout.y(TouchLayout.LEFT);
+        float radius = layout.radius(TouchLayout.LEFT);
+        event(MotionEvent.ACTION_MOVE, point(11, sx + radius, sy));
+        advance(600);
+        assertFalse(autoWalkLocked());
+        assertTrue(NativeSink.state[0] > 0);
+        assertEquals(0, NativeSink.state[1]);
+        event(MotionEvent.ACTION_MOVE, forward(11));
+        advance(599);
+        assertFalse(autoWalkLocked());
+        advance(1);
+        assertTrue(autoWalkLocked());
+        controls.reset();
+    }
+
+    @Test public void leavingForwardConeAfterLockReturnsToManualMovement() {
+        holdForward(11);
+        advance(600);
+        event(MotionEvent.ACTION_MOVE, point(11, layout.x(TouchLayout.LEFT) + 35,
+            layout.y(TouchLayout.LEFT)));
+        assertFalse(autoWalkLocked());
+        assertTrue(NativeSink.state[0] > 0);
+        assertEquals(0, NativeSink.state[1]);
+        event(MotionEvent.ACTION_UP, point(11, layout.x(TouchLayout.LEFT) + 35,
+            layout.y(TouchLayout.LEFT)));
+        assertReleased();
+    }
+
+    @Test public void finalUpPositionOutsideConeCancelsEvenWithoutALastMove() {
+        holdForward(11);
+        advance(600);
+        event(MotionEvent.ACTION_UP, point(11, layout.x(TouchLayout.LEFT),
+            layout.y(TouchLayout.LEFT)));
+        assertFalse(autoWalkLocked());
+        assertReleased();
+    }
+
+    @Test public void newStickTouchCancelsOnlyTheLockWhileFireAndAimContinue() {
+        holdForward(11);
+        advance(600);
+        event(MotionEvent.ACTION_UP, forward(11));
+        float fx = layout.x(4), fy = layout.y(4);
+        event(MotionEvent.ACTION_DOWN, point(23, fx, fy));
+        event(pointerDown(1), point(23, fx, fy), point(27, 570, 240));
+        assertTrue("Other fingers do not cancel automatic walking", autoWalkLocked());
+        float sx = layout.x(TouchLayout.LEFT), sy = layout.y(TouchLayout.LEFT);
+        event(pointerDown(2), point(23, fx, fy), point(27, 570, 240), point(11, sx, sy));
+        assertFalse(autoWalkLocked());
+        assertEquals(0, NativeSink.state[1]);
+        assertEquals(32767, NativeSink.state[5]);
+        event(MotionEvent.ACTION_MOVE, point(27, 590, 225), point(11, sx + 35, sy), point(23, fx, fy));
+        assertTrue(NativeSink.state[0] > 0);
+        assertEquals(32767, NativeSink.state[5]);
+        assertEquals(20, NativeSink.lookX, .001f);
+        assertEquals(-15, NativeSink.lookY, .001f);
+        event(MotionEvent.ACTION_CANCEL, point(27, 590, 225), point(11, sx + 35, sy), point(23, fx, fy));
+        assertReleased();
+    }
+
+    @Test public void floatingStickKeepsItsCenterUntilAutomaticWalkingIsCancelled() {
+        layout.floatingStick = true;
+        float x = 300, y = 440;
+        event(MotionEvent.ACTION_DOWN, point(11, x, y));
+        assertTrue((boolean) ReflectionHelpers.getField(controls, "stickFloating"));
+        event(MotionEvent.ACTION_MOVE, point(11, x, y - layout.radius(TouchLayout.LEFT)));
+        advance(600);
+        event(MotionEvent.ACTION_UP, point(11, x, y - layout.radius(TouchLayout.LEFT)));
+        assertTrue(autoWalkLocked());
+        assertTrue((boolean) ReflectionHelpers.getField(controls, "stickFloating"));
+        assertEquals(x, (float) ReflectionHelpers.getField(controls, "stickX"), .001f);
+        assertEquals(y, (float) ReflectionHelpers.getField(controls, "stickY"), .001f);
+        controls.reset();
+        assertFalse((boolean) ReflectionHelpers.getField(controls, "stickFloating"));
+    }
+
+    @Test public void resetDisarmsPendingCallbackAndNeverResurrectsMovement() {
+        holdForward(11);
+        advance(599);
+        Runnable stale = ReflectionHelpers.getField(controls, "lockAutoWalk");
+        controls.reset();
+        advance(1);
+        stale.run();
+        assertFalse(autoWalkLocked());
+        assertEquals(-1L, (long) ReflectionHelpers.getField(controls, "autoWalkSince"));
+        assertReleased();
+    }
+
+    @Test public void stopCancelsPendingAndLockedAutomaticWalking() {
+        holdForward(11);
+        advance(599);
+        controls.stopDeviceInput();
+        advance(1000);
+        assertFalse(autoWalkLocked());
+        assertReleased();
+        holdForward(11);
+        advance(600);
+        assertTrue(autoWalkLocked());
+        controls.stopDeviceInput();
+        assertFalse(autoWalkLocked());
+        assertReleased();
+    }
+
+    @Test public void cancelEventCancelsPendingAndLockedAutomaticWalking() {
+        for (long wait : new long[] {599, 600}) {
+            holdForward(11);
+            advance(wait);
+            event(MotionEvent.ACTION_CANCEL, forward(11));
+            advance(1000);
+            assertFalse(autoWalkLocked());
+            assertReleased();
+        }
+    }
+
+    @Test public void hidingControlsCancelsAutomaticWalking() {
+        holdForward(11);
+        advance(600);
+        event(MotionEvent.ACTION_UP, forward(11));
+        ReflectionHelpers.callInstanceMethod(controls, "setHidden",
+            ReflectionHelpers.ClassParameter.from(boolean.class, true));
+        advance(1000);
+        assertFalse(autoWalkLocked());
+        assertReleased();
+    }
+
+    @Test public void openingSettingsCancelsPendingAndLockedWalking() {
+        for (long wait : new long[] {599, 600}) {
+            holdForward(11);
+            advance(wait);
+            ReflectionHelpers.callInstanceMethod(controls, "showGeneral");
+            AlertDialog dialog = ShadowAlertDialog.getLatestAlertDialog();
+            try {
+                advance(1000);
+                assertFalse(autoWalkLocked());
+                assertReleased();
+            } finally {
+                dialog.dismiss();
+                advance(0);
+            }
+        }
+    }
+
+    @Test public void generalAutoWalkSwitchPersistsAndDisablingReleasesTheLock() {
+        ReflectionHelpers.callInstanceMethod(controls, "showGeneral");
+        AlertDialog dialog = ShadowAlertDialog.getLatestAlertDialog();
+        Switch autoWalk = findSwitch(dialog.getWindow().getDecorView(), "Avance automático");
+        assertNotNull("General exposes the automatic walking preference", autoWalk);
+        assertTrue(autoWalk.isChecked());
+        dialog.dismiss();
+        advance(0);
+        holdForward(11);
+        advance(600);
+        event(MotionEvent.ACTION_UP, forward(11));
+        assertTrue(autoWalkLocked());
+        autoWalk.performClick();
+        assertFalse((boolean) ReflectionHelpers.getField(controls, "autoWalkEnabled"));
+        assertFalse(controls.getContext().getSharedPreferences("touch-layout-v1", 0)
+            .getBoolean("auto-walk", true));
+        assertFalse(autoWalkLocked());
+        assertReleased();
+        holdForward(11);
+        advance(1200);
+        assertFalse("Disabled preference prevents a new latch", autoWalkLocked());
+        event(MotionEvent.ACTION_UP, forward(11));
+        assertReleased();
+        TouchControls restored = new TouchControls((HaloActivity) controls.getContext());
+        assertFalse((boolean) ReflectionHelpers.getField(restored, "autoWalkEnabled"));
+        autoWalk.performClick();
+        assertTrue(controls.getContext().getSharedPreferences("touch-layout-v1", 0)
+            .getBoolean("auto-walk", false));
+        assertTrue((boolean) ReflectionHelpers.getField(controls, "autoWalkEnabled"));
+    }
+
+    private void holdForward(int id) {
+        event(MotionEvent.ACTION_DOWN, point(id, layout.x(TouchLayout.LEFT), layout.y(TouchLayout.LEFT)));
+        event(MotionEvent.ACTION_MOVE, forward(id));
+    }
+
+    private float[] forward(int id) {
+        return point(id, layout.x(TouchLayout.LEFT), layout.y(TouchLayout.LEFT) - layout.radius(TouchLayout.LEFT));
+    }
+
+    private boolean autoWalkLocked() { return ReflectionHelpers.getField(controls, "autoWalkLocked"); }
+
+    private void advance(long milliseconds) {
+        shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(milliseconds));
+    }
+
     private void assertReleased() {
         assertArrayEquals(new int[7], NativeSink.state);
     }
 
     private static Switch findLeftFire(View view) {
-        if (view instanceof Switch && "Disparo izquierdo".contentEquals(((Switch) view).getText()))
+        return findSwitch(view, "Disparo izquierdo");
+    }
+
+    private static Switch findSwitch(View view, String caption) {
+        if (view instanceof Switch && caption.contentEquals(((Switch) view).getText()))
             return (Switch) view;
         if (view instanceof ViewGroup) {
             ViewGroup group = (ViewGroup) view;
             for (int i = 0; i < group.getChildCount(); i++) {
-                Switch found = findLeftFire(group.getChildAt(i));
+                Switch found = findSwitch(group.getChildAt(i), caption);
                 if (found != null) return found;
             }
         }
