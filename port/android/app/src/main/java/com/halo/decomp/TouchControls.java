@@ -15,6 +15,8 @@ import android.hardware.SensorManager;
 import android.hardware.input.InputManager;
 import android.media.AudioAttributes;
 import android.os.Build;
+import android.os.Handler;
+import android.os.Looper;
 import android.os.SystemClock;
 import android.os.VibrationEffect;
 import android.os.Vibrator;
@@ -79,6 +81,8 @@ public final class TouchControls extends View implements SensorEventListener, In
     /** a label is at most this many radii wide */
     private static final float LABEL_WIDTH = 1.7f;
     private static final long POLL_MS = 16;
+    /** Long enough for the game's 30 Hz input to read a released grenade tap. */
+    private static final long GRENADE_PULSE_MS = 80;
     /** the game is in play this long before the controls show (no flash at a level's first frame) */
     private static final long SHOW_DELAY_MS = 200;
     private static final long VIBRATION_MS = 110;
@@ -188,6 +192,12 @@ public final class TouchControls extends View implements SensorEventListener, In
 
     /** what each finger holds: a control, LOOK, or (in toolbarFingers) a toolbar item */
     private final SparseIntArray owners = new SparseIntArray();
+    private final Handler releaseHandler = new Handler(Looper.getMainLooper());
+    private int grenadePulseType = NOTHING;
+    private final Runnable clearGrenadePulse = () -> {
+        grenadePulseType = NOTHING;
+        publish();
+    };
     /** button swipe origins and inactive aiming fingers' latest positions, in pixels */
     private final SparseArray<float[]> buttonTouches = new SparseArray<>();
     /** each finger on a toolbar item: {x, y, item}; the item acts when it lifts there */
@@ -481,6 +491,7 @@ public final class TouchControls extends View implements SensorEventListener, In
 
     /** lets go of every finger and sends a released controller */
     public void reset() {
+        cancelGrenadePulse();
         dragPointer = -1;
         dragControl = -1;
         owners.clear();
@@ -508,12 +519,30 @@ public final class TouchControls extends View implements SensorEventListener, In
             if (control < 0 || control >= layout.size())
                 continue;
             Kind kind = KINDS[layout.type(control)];
+            if (isGrenade(kind))
+                continue;
+            if (kind.bit >= 0)
+                bits |= 1 << kind.bit;
+            if (kind.trigger >= 0)
+                axes[kind.trigger] = 32767;
+        }
+        if (grenadePulseType >= 0) {
+            Kind kind = KINDS[grenadePulseType];
             if (kind.bit >= 0)
                 bits |= 1 << kind.bit;
             if (kind.trigger >= 0)
                 axes[kind.trigger] = 32767;
         }
         nativeState(axes[0], axes[1], axes[2], axes[3], axes[4], axes[5], bits);
+    }
+
+    private boolean isGrenade(Kind kind) {
+        return kind.gamepadButton >= 0 && bindings[kind.gamepadButton] == 6;
+    }
+
+    private void cancelGrenadePulse() {
+        releaseHandler.removeCallbacks(clearGrenadePulse);
+        grenadePulseType = NOTHING;
     }
 
     private boolean held(int control) {
@@ -760,6 +789,7 @@ public final class TouchControls extends View implements SensorEventListener, In
             return;
         }
         int control = owners.get(id, NOTHING);
+        int releasedType = control >= 0 ? layout.type(control) : NOTHING;
         if (control >= 0 && layout.type(control) == TouchLayout.LEFT) {
             axes[0] = 0;
             axes[1] = 0;
@@ -768,6 +798,11 @@ public final class TouchControls extends View implements SensorEventListener, In
         boolean wasLooking = id == lookPointer;
         owners.delete(id);
         buttonTouches.remove(id);
+        if (releasedType >= 0 && isGrenade(KINDS[releasedType])) {
+            cancelGrenadePulse();
+            grenadePulseType = releasedType;
+            releaseHandler.postDelayed(clearGrenadePulse, GRENADE_PULSE_MS);
+        }
         if (wasLooking) {
             lookPointer = -1;
             for (int i = owners.size() - 1; i >= 0; i--) {
@@ -838,6 +873,10 @@ public final class TouchControls extends View implements SensorEventListener, In
         bindingsSerial = serial;
         if (!Arrays.equals(bindingsRead, bindings)) {
             System.arraycopy(bindingsRead, 0, bindings, 0, bindings.length);
+            if (grenadePulseType >= 0) {
+                cancelGrenadePulse();
+                publish();
+            }
             invalidate();
         }
     }

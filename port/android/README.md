@@ -177,6 +177,11 @@ The action icons follow the profile's "Button layout" (Settings >
 Gamepads): with "Swap triggers", the right trigger's button shows a grenade.
 The stick moves the player with every "Stick layout", southpaw too.
 
+The touch button mapped to Grenade throws when its finger lifts; holding
+and dragging only aims. Release sends an 80 ms controller pulse, while
+cancellation or focus loss clears it. This follows remapped buttons and
+does not change physical gamepads.
+
 A finger that holds a button can also swipe to look, so you can fire and
 aim with one thumb. The controls are a finger wide (48 dp) or larger, but
 on a small screen of high density they stay apart rather than reach that
