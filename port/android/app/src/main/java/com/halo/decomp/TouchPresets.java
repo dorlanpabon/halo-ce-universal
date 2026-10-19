@@ -16,10 +16,15 @@ final class TouchPresets {
         {800, 480}, {900, 236}, {526, 480}, {612, 480}, {576, 68}, {390, 68},
         {100, 237}, {100, 335}, {51, 286}, {149, 286}, {130, 420}, {145, 110}
     };
-    private static final float[][] PLACES = {
+    private static final float[][] REDISTRIBUTED_PLACES = {
         {900, 445}, {900, 350}, {790, 180}, {900, 180}, {785, 350}, {260, 410},
         {790, 470}, {900, 265}, {105, 205}, {220, 205}, {576, 68}, {390, 68},
         {100, 237}, {100, 335}, {51, 286}, {149, 286}, {130, 420}, {310, 300}
+    };
+    private static final float[][] PLACES = {
+        {900, 430}, {900, 330}, {812, 146}, {900, 146}, {780, 350}, {700, 450},
+        {800, 480}, {900, 236}, {526, 480}, {612, 480}, {576, 68}, {390, 68},
+        {100, 237}, {100, 335}, {51, 286}, {149, 286}, {130, 420}, {145, 110}
     };
     private static final float[] SIZES = {
         1, 34f / 32, 1, 34f / 32, 1.35f, 1, 34f / 32, 34f / 32,
@@ -42,19 +47,27 @@ final class TouchPresets {
         return new TouchLayout().exportConfiguration(1f);
     }
 
-    /** Redistribute only an unchanged mobile preset; hand-positioned HUDs stay authored. */
+    /** Restore preset positions without replacing a hand-positioned HUD or its settings. */
     static String upgradeMobileLayout(String configuration) {
         TouchLayout.Configuration saved = TouchLayout.importConfiguration(configuration);
         if (saved.layout.size() != LEGACY_PLACES.length)
             return configuration;
+        boolean legacy = true, redistributed = true;
         for (int i = 0; i < LEGACY_PLACES.length; i++) {
-            if (saved.layout.type(i) != i
-                    || Math.abs(saved.layout.savedX(i) - LEGACY_PLACES[i][0]) > 0.1f
-                    || Math.abs(saved.layout.savedY(i) - LEGACY_PLACES[i][1]) > 0.1f)
+            if (saved.layout.type(i) != i)
                 return configuration;
+            legacy &= Math.abs(saved.layout.savedX(i) - LEGACY_PLACES[i][0]) <= 0.1f
+                && Math.abs(saved.layout.savedY(i) - LEGACY_PLACES[i][1]) <= 0.1f;
+            redistributed &= Math.abs(saved.layout.savedX(i) - REDISTRIBUTED_PLACES[i][0]) <= 0.1f
+                && Math.abs(saved.layout.savedY(i) - REDISTRIBUTED_PLACES[i][1]) <= 0.1f;
         }
-        for (int i = 0; i < PLACES.length; i++)
-            saved.layout.move(i, PLACES[i][0], PLACES[i][1]);
+        if (!legacy && !redistributed)
+            return configuration;
+        for (int i = 0; i < PLACES.length; i++) {
+            if (Math.abs(saved.layout.savedX(i) - PLACES[i][0]) > 0.1f
+                    || Math.abs(saved.layout.savedY(i) - PLACES[i][1]) > 0.1f)
+                saved.layout.move(i, PLACES[i][0], PLACES[i][1]);
+        }
         return saved.layout.exportConfiguration(saved.sensitivity);
     }
 

@@ -111,8 +111,8 @@ An `adb pull` of the whole `save` folder stops at the `blam.lst` files of
 The touch buttons stay inside the stable system-bar, gesture and display-cutout
 margins on all four edges. Hide and Settings have a separate top row. These
 display adjustments do not overwrite the saved HUD positions. Mobile presets
-spread secondary actions across both sides; their visible targets do not overlap
-on the tested phone. Custom HUD positions are preserved. Game Icons silhouettes
+keep their earlier arrangement, with only Fire moved slightly away from Melee.
+Unchanged redistributed presets are restored; custom HUD positions are preserved. Game Icons silhouettes
 replace the small line drawings; X / USAR and Y / ARMA match the game's prompts.
 The icons' CC BY 3.0 attribution is in `assets/notices/game-icons.txt` in the APK.
 Touch Pause and Back open the Android pause dialog, including in demo maps
