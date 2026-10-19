@@ -157,7 +157,7 @@ public final class TouchControls extends View implements SensorEventListener, In
     private static native int nativeBindings(int[] controls);
 
     private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
-    private final TouchIcons icons = new TouchIcons();
+    private final TouchIcons icons = new TouchIcons(getResources());
     private final SharedPreferences preferences;
     private final SensorManager sensors;
     private final Sensor gyroscope;
@@ -304,7 +304,7 @@ public final class TouchControls extends View implements SensorEventListener, In
         if (configuration == null)
             configuration = TouchPresets.twoThumbs();
         try {
-            TouchLayout.Configuration saved = TouchLayout.importConfiguration(configuration);
+            TouchLayout.Configuration saved = TouchLayout.importConfiguration(TouchPresets.upgradeMobileLayout(configuration));
             layout = saved.layout;
             sensitivity = saved.sensitivity;
         } catch (IllegalArgumentException e) {
@@ -568,11 +568,20 @@ public final class TouchControls extends View implements SensorEventListener, In
             return TOOLBAR_TOGGLE;
         if (hidden && !editing)
             return NOTHING;
+        int nearest = NOTHING;
+        float distance = Float.POSITIVE_INFINITY;
         for (int i = 0; i < layout.size(); i++) {
-            if ((editing || layout.shown(i)) && layout.type(i) != TouchLayout.LEFT
-                    && inside(x, y, layout.x(i), layout.y(i), layout.radius(i)))
-                return i;
+            if ((editing || layout.shown(i)) && layout.type(i) != TouchLayout.LEFT) {
+                float dx = x - layout.x(i), dy = y - layout.y(i), radius = layout.radius(i);
+                float relative = (dx * dx + dy * dy) / (radius * radius);
+                if (relative <= 1 && relative < distance) {
+                    nearest = i;
+                    distance = relative;
+                }
+            }
         }
+        if (nearest != NOTHING)
+            return nearest;
         int stick = TouchLayout.LEFT;
         float reach = editing ? 1 : STICK_REACH;
         if ((editing || layout.shown(stick)) && !held(stick)
@@ -979,7 +988,7 @@ public final class TouchControls extends View implements SensorEventListener, In
     }
 
     private void applyEditorLayout(String configuration) {
-        TouchLayout.Configuration saved = TouchLayout.importConfiguration(configuration);
+        TouchLayout.Configuration saved = TouchLayout.importConfiguration(TouchPresets.upgradeMobileLayout(configuration));
         reset();
         layout = saved.layout;
         sensitivity = saved.sensitivity;
