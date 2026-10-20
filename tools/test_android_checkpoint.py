@@ -10,7 +10,8 @@ For a standalone clang missing its resource headers, pass --resource-dir.
 
 The production protocol, snapshot function and CRC functions are extracted
 unchanged. Payloads are synthetic; engine callbacks/validators and deliberate
-I/O failures are stubs. These tests require no game assets or Android device.
+I/O failures are stubs. The allocator rejects free(NULL), as cseries'
+debug_free does. These tests require no game assets or Android device.
 """
 import argparse
 import contextlib
@@ -142,6 +143,12 @@ static int test_rename(char const *from, char const *to) {
 #endif
 }
 static int test_remove(char const *path) { return remove(disk_path(path)); }
+/* Production includes cseries.h: its free macro requires an allocation. */
+static int engine_free_calls;
+static void test_engine_free(void *pointer) {
+    CHECK(pointer != NULL); engine_free_calls++; free(pointer);
+}
+#define free test_engine_free
 #define fopen test_open
 #define fwrite test_write
 #define fclose test_close
@@ -156,6 +163,7 @@ tests = r'''
 #undef fwrite
 #undef fclose
 #undef remove
+#undef free
 static struct android_checkpoint_request request;
 static byte good[512 + GAME_STATE_SIZE];
 static void save_good(void) {
@@ -188,7 +196,7 @@ static void read_is(char const *status) {
 int main(void) {
     struct game_state_header *h = (struct game_state_header *)snapshot;
     struct android_checkpoint_request parsed;
-    FILE *f; void *image; byte copy[GAME_STATE_SIZE]; int i;
+    FILE *f; void *image; byte copy[GAME_STATE_SIZE]; int i, frees_before;
     memset(&request, 0, sizeof(request)); memset(request.id, 'a', 32); strcpy(request.operation, "save");
     memset(request.fingerprint[0], 'b', 64); memset(request.fingerprint[1], 'c', 64);
     game_state_globals.base_address = live; game_state_globals.saved_game_valid = TRUE;
@@ -246,10 +254,16 @@ int main(void) {
     android_checkpoint_poll(1100); f = fopen("mobile-checkpoint.request", "rb"); CHECK(f != NULL); fclose(f);
     android_checkpoint_poll(1250); status_is("saved");
     write_request("mobile-checkpoint.boot", "new"); android_checkpoint_boot_prepare(); CHECK(!persistent); status_is("new"); unchanged();
+    frees_before = engine_free_calls; CHECK(android_checkpoint_pending_image == NULL);
     write_request("mobile-checkpoint.boot", "continue"); android_checkpoint_boot_prepare();
+    CHECK(engine_free_calls == frees_before);
     CHECK(android_checkpoint_pending_image != NULL); CHECK(!strcmp(selected_map, h->map_name)); CHECK(selected_difficulty == h->difficulty);
     CHECK(before_calls == 0); CHECK(live[400] == 7); CHECK(!persistent);
+    /* Replacing a pending load still releases its non-null allocation once. */
+    write_request("mobile-checkpoint.boot", "continue"); android_checkpoint_boot_prepare();
+    CHECK(engine_free_calls == frees_before + 1); CHECK(android_checkpoint_pending_image != NULL);
     android_checkpoint_after_new_map(); status_is("resumed"); CHECK(live[400] == 42);
+    CHECK(engine_free_calls == frees_before + 2);
     CHECK(before_calls == 1 && after_calls == 1 && save_calls == 1); CHECK(android_checkpoint_pending_image == NULL);
     memset(live, 7, sizeof(live)); write_request("mobile-checkpoint.boot", "continue"); android_checkpoint_boot_prepare();
     arrays_valid = 0; android_checkpoint_after_new_map(); status_is("corrupt"); CHECK(before_calls == 1); CHECK(live[400] == 7); arrays_valid = 1;
