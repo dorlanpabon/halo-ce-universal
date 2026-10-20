@@ -1382,7 +1382,9 @@ void android_checkpoint_boot_prepare(void)
 		android_checkpoint_status(request.id, "unsupported");
 		return;
 	}
-	free(android_checkpoint_pending_image);
+	/* port: cseries' debug_free requires a non-null allocation. */
+	if (android_checkpoint_pending_image)
+		free(android_checkpoint_pending_image);
 	android_checkpoint_pending_image = NULL;
 	result = android_checkpoint_read(&request, &android_checkpoint_pending_image);
 	if (strcmp(result, "ready"))
