@@ -12,6 +12,16 @@ Returning to an already running game and multiplayer invitations bypass this
 choice. A failed restore displays an error and requires exiting; it never claims
 to have continued a newly started map.
 
+The cold launcher also offers **Jugar demo** when `maps/ui.map` and
+`maps/demob30.map` are installed. It starts a new demo without loading or
+replacing the saved checkpoint; **Guardar y salir** can subsequently replace
+that single slot, as the launcher explains. Demo startup journals `init.txt`
+privately and temporarily replaces only its map command. Input stays blocked
+until the engine acknowledges the matching `new` request, then the original
+script is restored. An interrupted launch is recovered before the next cold
+start. Existing game sessions must be saved and closed before changing to the
+demo. No maps or download URLs are bundled.
+
 ## Compatibility and storage
 
 The save slot is `save/z/mobile-checkpoint.bin` inside the app's external files

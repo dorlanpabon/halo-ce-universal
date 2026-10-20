@@ -17,7 +17,9 @@ public final class ProfileRestartActivity extends Activity {
             finishAndRemoveTask();
             return;
         }
-        startActivity(new Intent(this, LauncherActivity.class));
+        startActivity(new Intent(this, LauncherActivity.class)
+            .putExtra("resume-after-graphics", true)
+            .putExtra("launch-demo", getIntent().getBooleanExtra("launch-demo", false)));
         finish();
     }
 }
