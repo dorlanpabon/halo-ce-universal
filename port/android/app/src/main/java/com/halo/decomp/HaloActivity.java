@@ -28,12 +28,15 @@ import android.widget.FrameLayout;
 import android.widget.LinearLayout;
 import android.widget.ProgressBar;
 import android.widget.TextView;
+import android.widget.EditText;
+import android.widget.ScrollView;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
+import java.util.List;
 
 import org.libsdl.app.SDLActivity;
 
@@ -60,10 +63,12 @@ public class HaloActivity extends SDLActivity {
     static final String DEMO_BOOT_ID = "demo-boot-id";
     private final Handler checkpointHandler = new Handler(Looper.getMainLooper());
     private CheckpointStore checkpointStore;
-    private String checkpointRequestId;
+    private CheckpointSlots checkpointSlots;
+    private volatile String checkpointRequestId;
     private boolean checkpointRestoring, checkpointExiting;
     private View checkpointProgress;
     private AlertDialog checkpointErrorDialog;
+    private AlertDialog checkpointSaveDialog;
     private Thread checkpointWorker;
     private Runnable checkpointDeadline;
     private Thread demoWorker;
@@ -122,7 +127,7 @@ public class HaloActivity extends SDLActivity {
     }
 
     private boolean touchOverlayPaused() {
-        return touchPauseDialog != null || checkpointErrorDialog != null || checkpointExiting
+        return touchPauseDialog != null || checkpointErrorDialog != null || checkpointSaveDialog != null || checkpointExiting
             || (touchControls != null && touchControls.isEditing());
     }
 
@@ -163,14 +168,121 @@ public class HaloActivity extends SDLActivity {
         return checkpointStore;
     }
 
+    private CheckpointSlots checkpointSlots() throws IOException {
+        if (checkpointSlots == null)
+            checkpointSlots = new CheckpointSlots(getExternalFilesDir(null), checkpointStore());
+        return checkpointSlots;
+    }
+
     void startCheckpointSave() {
+        if (checkpointBusy() || checkpointSaveDialog != null || isFinishing() || isDestroyed())
+            return;
+        AlertDialog loading = new AlertDialog.Builder(this).setTitle("Guardar partida")
+            .setMessage("Leyendo las partidas guardadas…").setNegativeButton("Cancelar", null).create();
+        showCheckpointSaveDialog(loading);
+        checkpointWorker = new Thread(() -> {
+            try {
+                CheckpointSlots slots = checkpointSlots();
+                slots.preserveLegacy();
+                List<CheckpointSlots.Entry> entries = slots.list();
+                checkpointHandler.post(() -> {
+                    if (checkpointSaveDialog == loading && !isFinishing() && !isDestroyed())
+                        showCheckpointSaveChoices(entries);
+                });
+            } catch (IOException e) {
+                checkpointHandler.post(() -> {
+                    if (checkpointSaveDialog == loading && !isFinishing() && !isDestroyed())
+                        showCheckpointSaveDialog(new AlertDialog.Builder(this).setTitle("No se pudieron leer las partidas")
+                            .setMessage("Tus guardados se conservan. Comprueba el almacenamiento e inténtalo de nuevo.")
+                            .setPositiveButton("Volver a pausa", null).create());
+                });
+            }
+        }, "checkpoint choices");
+        checkpointWorker.start();
+    }
+
+    private void showCheckpointSaveChoices(List<CheckpointSlots.Entry> entries) {
+        LinearLayout content = new LinearLayout(this);
+        content.setOrientation(LinearLayout.VERTICAL);
+        Button create = new Button(this);
+        create.setText("Nueva partida guardada");
+        create.setEnabled(entries.size() < CheckpointSlots.MAX_SLOTS);
+        create.setOnClickListener(v -> showCheckpointName());
+        content.addView(create);
+        for (CheckpointSlots.Entry entry : entries) {
+            Button replace = new Button(this);
+            replace.setText(SaveLabels.label(entry));
+            replace.setOnClickListener(v -> showCheckpointSaveDialog(new AlertDialog.Builder(this)
+                .setTitle("Reemplazar partida")
+                .setMessage("¿Reemplazar «" + entry.name + "» con el último punto de control de esta partida?")
+                .setPositiveButton("Reemplazar", (dialog, which) -> beginCheckpointSave(entry.id, entry.name))
+                .setNegativeButton("Cancelar", null).create()));
+            content.addView(replace);
+        }
+        ScrollView scroll = new ScrollView(this);
+        scroll.addView(content);
+        showCheckpointSaveDialog(new AlertDialog.Builder(this).setTitle("Guardar partida")
+            .setMessage(entries.size() >= CheckpointSlots.MAX_SLOTS
+                ? "Hay 10 partidas. Elige una para reemplazarla."
+                : "Crea otra partida o elige cuál reemplazar. Se guarda el último punto de control.")
+            .setView(scroll).setNegativeButton("Cancelar", null).create());
+    }
+
+    private void showCheckpointName() {
+        EditText name = new EditText(this);
+        name.setSingleLine(true);
+        name.setHint("Nombre de la partida");
+        AlertDialog dialog = new AlertDialog.Builder(this).setTitle("Nueva partida guardada")
+            .setView(name).setPositiveButton("Guardar y salir", null).setNegativeButton("Cancelar", null).create();
+        showCheckpointSaveDialog(dialog);
+        dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> {
+            String raw = name.getText().toString();
+            String text = raw.trim();
+            boolean invalid = text.isEmpty() || text.getBytes(StandardCharsets.UTF_8).length > 160;
+            for (int index = 0; index < raw.length(); index++)
+                invalid |= Character.isISOControl(raw.charAt(index)) || Character.isSurrogate(raw.charAt(index));
+            if (invalid)
+                name.setError("Escribe un nombre corto sin saltos de línea.");
+            else
+                beginCheckpointSave(null, text);
+        });
+    }
+
+    private void showCheckpointSaveDialog(AlertDialog dialog) {
+        AlertDialog previous = checkpointSaveDialog;
+        checkpointSaveDialog = dialog;
+        if (touchControls != null)
+            touchControls.stopDeviceInput();
+        pauseNativeThread();
+        dialog.setCanceledOnTouchOutside(false);
+        dialog.setOnDismissListener(d -> {
+            if (checkpointSaveDialog == dialog) {
+                checkpointSaveDialog = null;
+                if (!checkpointBusy() && !isFinishing() && !isDestroyed()) {
+                    if (checkpointWorker != null)
+                        checkpointWorker.interrupt();
+                    showTouchPauseMenu();
+                }
+                resumeTouchGameIfReady();
+            }
+        });
+        dialog.show();
+        if (previous != null)
+            previous.dismiss();
+        if (touchPauseDialog != null)
+            touchPauseDialog.dismiss();
+    }
+
+    void beginCheckpointSave(String target, String name) {
         if (checkpointBusy() || isFinishing() || isDestroyed())
             return;
         String id = CheckpointStore.newId();
         beginCheckpointOperation(id, false);
+        if (checkpointSaveDialog != null)
+            checkpointSaveDialog.dismiss();
         if (touchPauseDialog != null)
             touchPauseDialog.dismiss();
-        watchCheckpoint(id, false);
+        watchCheckpoint(id, false, target, name);
     }
 
     private void beginCheckpointOperation(String id, boolean restoring) {
@@ -202,14 +314,38 @@ public class HaloActivity extends SDLActivity {
     }
 
     private void watchCheckpoint(String id, boolean restoring) {
+        watchCheckpoint(id, restoring, null, null);
+    }
+
+    private void watchCheckpoint(String id, boolean restoring, String target, String name) {
         checkpointWorker = new Thread(() -> {
+            boolean saved = false;
             try {
                 CheckpointStore store = checkpointStore();
-                if (!restoring)
+                if (!restoring) {
+                    checkpointSlots().preserveLegacy();
                     store.writeRequest(id);
+                }
                 while (!Thread.currentThread().isInterrupted()) {
                     String result = store.result(id, restoring);
                     if (result != null) {
+                        if (!restoring && result.equals("saved")) {
+                            saved = true;
+                            if (!id.equals(checkpointRequestId) || Thread.currentThread().isInterrupted())
+                                return;
+                            checkpointHandler.post(() -> {
+                                if (id.equals(checkpointRequestId)) {
+                                    if (checkpointDeadline != null)
+                                        checkpointHandler.removeCallbacks(checkpointDeadline);
+                                    checkpointDeadline = () -> completeCheckpoint(id, "archive_error");
+                                    checkpointHandler.postDelayed(checkpointDeadline, 30000);
+                                }
+                            });
+                            if (target == null)
+                                checkpointSlots().saveNew(name);
+                            else
+                                checkpointSlots().replace(target, name);
+                        }
                         checkpointHandler.post(() -> completeCheckpoint(id, result));
                         return;
                     }
@@ -218,8 +354,10 @@ public class HaloActivity extends SDLActivity {
             } catch (InterruptedException ignored) {
                 Thread.currentThread().interrupt();
             } catch (IOException e) {
-                if (!Thread.currentThread().isInterrupted())
-                    checkpointHandler.post(() -> completeCheckpoint(id, "io_error"));
+                if (!Thread.currentThread().isInterrupted()) {
+                    String result = saved ? "archive_error" : "io_error";
+                    checkpointHandler.post(() -> completeCheckpoint(id, result));
+                }
             }
         }, restoring ? "checkpoint restore" : "checkpoint save");
         checkpointWorker.start();
@@ -264,6 +402,10 @@ public class HaloActivity extends SDLActivity {
                 break;
             case "save_timeout":
                 message = "El juego no confirmó el guardado a tiempo. No se cerró la partida.";
+                break;
+            case "archive_error":
+                message = "El juego escribió el punto de control, pero no se pudo añadir a tus partidas guardadas. "
+                    + "La partida sigue abierta; se conservan la copia de recuperación y los guardados anteriores. Comprueba el espacio disponible.";
                 break;
             case "restore_timeout":
                 message = "El juego no confirmó la continuación a tiempo. Tu archivo guardado se conserva.";

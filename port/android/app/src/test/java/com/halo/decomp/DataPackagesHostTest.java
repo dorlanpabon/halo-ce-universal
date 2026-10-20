@@ -24,7 +24,10 @@ import org.robolectric.shadows.ShadowAlertDialog;
 import org.robolectric.util.ReflectionHelpers;
 import java.io.File;
 import java.nio.charset.StandardCharsets;
+import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
 import java.nio.file.Files;
+import java.util.concurrent.atomic.AtomicBoolean;
 import static org.junit.Assert.*;
 import static org.robolectric.Shadows.shadowOf;
 
@@ -121,6 +124,42 @@ public class DataPackagesHostTest {
             assertEquals("Aceptar", dialog.getButton(AlertDialog.BUTTON_POSITIVE).getText().toString());
             assertNull(shadowOf(activity).getNextStartedActivity());
             dialog.dismiss();
+        }
+    }
+
+    @Test public void installedDemoPlaysImmediatelyWithoutNetworkOrChangingFiles() throws Exception {
+        File maps = new File(activity.root, "maps");
+        assertTrue(maps.mkdir());
+        byte[] map = new byte[0x800];
+        ByteBuffer.wrap(map).order(ByteOrder.LITTLE_ENDIAN)
+            .putInt(0, 0x68656164).putInt(4, 5).putInt(8, 0x800)
+            .putInt(0x10, 0x800).putInt(0x14, 0).putInt(0x7fc, 0x666f6f74);
+        Files.write(new File(maps, "ui.map").toPath(), map);
+        Files.write(new File(maps, "demob30.map").toPath(), map);
+        AtomicBoolean ready = new AtomicBoolean();
+        DataPackages.playDemo(activity, () -> ready.set(true), dialog -> fail("No dialog or network needed"));
+        assertTrue(ready.get());
+        assertFalse(DataPackages.isBusy());
+        assertArrayEquals(map, Files.readAllBytes(new File(maps, "ui.map").toPath()));
+        assertArrayEquals(map, Files.readAllBytes(new File(maps, "demob30.map").toPath()));
+        assertFalse(new File(activity.getCacheDir(), "game-data.partial").exists());
+    }
+
+    @Test public void demoCannotDownloadWithMissingStorageOrWhileAnotherTransferIsBusy() {
+        activity.root = null;
+        DataPackages.playDemo(activity, () -> fail("No storage"), AlertDialog::show);
+        assertTrue(shadowOf(ShadowAlertDialog.getLatestAlertDialog()).getMessage().toString()
+            .contains("almacenamiento"));
+        AtomicBoolean busy = ReflectionHelpers.getStaticField(DataPackages.class, "busy");
+        busy.set(true);
+        try {
+            activity.root = temporary.getRoot();
+            DataPackages.playDemo(activity, () -> fail("Do not start a second transfer"), AlertDialog::show);
+            assertTrue(shadowOf(ShadowAlertDialog.getLatestAlertDialog()).getMessage().toString()
+                .contains("en curso"));
+            assertFalse(new File(activity.getCacheDir(), "game-data.partial").exists());
+        } finally {
+            busy.set(false);
         }
     }
 

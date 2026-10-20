@@ -9,6 +9,7 @@ import android.view.View;
 import android.view.ViewGroup;
 import android.widget.Button;
 import android.widget.FrameLayout;
+import android.widget.EditText;
 
 import org.junit.After;
 import org.junit.Before;
@@ -24,8 +25,14 @@ import org.robolectric.shadows.ShadowAlertDialog;
 import org.robolectric.util.ReflectionHelpers;
 
 import java.io.ByteArrayInputStream;
+import java.io.File;
+import java.io.RandomAccessFile;
+import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 import java.time.Duration;
+import java.util.zip.CRC32;
 
 import static org.junit.Assert.*;
 import static org.robolectric.Shadows.shadowOf;
@@ -40,6 +47,9 @@ public class CheckpointUiHostTest {
     @Rule public TemporaryFolder temporary = new TemporaryFolder();
     private HaloActivity activity;
     private TouchControls controls;
+    private File dataRoot;
+    private CheckpointStore store;
+    private CheckpointSlots slots;
 
     @Before public void prepare() throws Exception {
         PauseMenuHostTest.EngineBoundary.pauses = PauseMenuHostTest.EngineBoundary.resumes = 0;
@@ -52,8 +62,12 @@ public class CheckpointUiHostTest {
         ReflectionHelpers.setField(controls, "showing", true);
         ReflectionHelpers.setField(activity, "touchControls", controls);
         ReflectionHelpers.setField(activity, "activityResumed", true);
-        ReflectionHelpers.setField(activity, "checkpointStore", new CheckpointStore(temporary.newFolder(),
-            name -> new ByteArrayInputStream(name.getBytes(StandardCharsets.US_ASCII))));
+        dataRoot = temporary.newFolder();
+        store = new CheckpointStore(dataRoot,
+            name -> new ByteArrayInputStream(name.getBytes(StandardCharsets.US_ASCII)));
+        slots = new CheckpointSlots(dataRoot, store);
+        ReflectionHelpers.setField(activity, "checkpointStore", store);
+        ReflectionHelpers.setField(activity, "checkpointSlots", slots);
     }
 
     @After public void stopWork() throws Exception {
@@ -89,10 +103,82 @@ public class CheckpointUiHostTest {
         Button save = button(pause.getWindow().getDecorView(), "Guardar y salir");
         assertNotNull(save);
         save.performClick();
+        joinWorker();
+        AlertDialog choices = ShadowAlertDialog.getLatestAlertDialog();
+        Button create = button(choices.getWindow().getDecorView(), "Nueva partida guardada");
+        assertNotNull(create);
+        create.performClick();
+        AlertDialog naming = ShadowAlertDialog.getLatestAlertDialog();
+        findName(naming.getWindow().getDecorView()).setText("Mi partida");
+        naming.getButton(AlertDialog.BUTTON_POSITIVE).performClick();
         shadowOf(Looper.getMainLooper()).idle();
         assertFalse("No dialog may suspend SDL during the save", pause.isShowing());
         assertNotNull(ReflectionHelpers.getField(activity, "checkpointProgress"));
         return ReflectionHelpers.getField(activity, "checkpointRequestId");
+    }
+
+    private EditText findName(View view) {
+        if (view instanceof EditText)
+            return (EditText) view;
+        if (view instanceof ViewGroup)
+            for (int index = 0; index < ((ViewGroup) view).getChildCount(); index++) {
+                EditText result = findName(((ViewGroup) view).getChildAt(index));
+                if (result != null)
+                    return result;
+            }
+        return null;
+    }
+
+    private void joinWorker() {
+        Thread worker = ReflectionHelpers.getField(activity, "checkpointWorker");
+        try {
+            if (worker != null) {
+                worker.join(5000);
+                assertFalse("File worker must finish", worker.isAlive());
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new AssertionError(e);
+        }
+        shadowOf(Looper.getMainLooper()).idle();
+    }
+
+    private File checkpoint(String suffix) { return new File(dataRoot, "save/z/" + CheckpointStore.PREFIX + suffix); }
+
+    private void waitForRequest() throws Exception {
+        long deadline = System.nanoTime() + 5_000_000_000L;
+        while (!checkpoint(".request").isFile() && System.nanoTime() < deadline)
+            Thread.sleep(10);
+        assertTrue("Native save request must be published", checkpoint(".request").isFile());
+    }
+
+    private void nativeCheckpoint(int seed) throws Exception {
+        File directory = checkpoint(".bin").getParentFile();
+        assertTrue(directory.isDirectory() || directory.mkdirs());
+        byte[] payload = new byte[32768];
+        java.util.Arrays.fill(payload, (byte) seed);
+        CRC32 crc = new CRC32();
+        for (int offset = 0; offset < CheckpointStore.IMAGE_SIZE; offset += payload.length)
+            crc.update(payload);
+        ByteBuffer header = ByteBuffer.allocate(CheckpointStore.HEADER_SIZE).order(ByteOrder.LITTLE_ENDIAN);
+        header.put("OCESAVE1".getBytes(StandardCharsets.US_ASCII));
+        header.putInt(8, 1).putInt(12, CheckpointStore.HEADER_SIZE).putInt(16, CheckpointStore.IMAGE_SIZE)
+            .putInt(20, (int) crc.getValue()).putInt(24, 1).putInt(28, 0);
+        header.position(32);
+        header.put(store.fingerprints().gl.getBytes(StandardCharsets.US_ASCII));
+        header.position(96);
+        header.put("levels\\demob30\\demob30".getBytes(StandardCharsets.US_ASCII));
+        try (RandomAccessFile output = new RandomAccessFile(checkpoint(".bin"), "rw")) {
+            output.setLength(0);
+            output.write(header.array());
+            for (int offset = 0; offset < CheckpointStore.IMAGE_SIZE; offset += payload.length)
+                output.write(payload);
+        }
+    }
+
+    private void acknowledge(String id) throws Exception {
+        Files.write(checkpoint(".status").toPath(), (id + "\nsaved\n").getBytes(StandardCharsets.US_ASCII));
+        joinWorker();
     }
 
     private String restore() {
@@ -123,6 +209,97 @@ public class CheckpointUiHostTest {
         assertTrue(activity.dispatchKeyEvent(new KeyEvent(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_BACK)));
         assertNull(ReflectionHelpers.getField(activity, "touchPauseDialog"));
         assertNull(shadowOf(activity).getNextStartedActivity());
+    }
+
+    @Test public void cancellingSaveChooserReturnsToPauseWithoutWritingRequest() {
+        activity.showTouchPauseMenu();
+        activity.startCheckpointSave();
+        joinWorker();
+        assertNotNull(ReflectionHelpers.getField(activity, "checkpointSaveDialog"));
+        activity.onWindowFocusChanged(true);
+        assertFalse((boolean) ReflectionHelpers.getField(controls, "deviceInputActive"));
+        ShadowAlertDialog.getLatestAlertDialog().getButton(AlertDialog.BUTTON_NEGATIVE).performClick();
+        shadowOf(Looper.getMainLooper()).idle();
+        assertEquals("Pausa", shadowOf(ShadowAlertDialog.getLatestAlertDialog()).getTitle());
+        assertFalse(checkpoint(".request").exists());
+    }
+
+    @Test public void emptySaveNameDoesNotWriteRequestOrDismissChooser() {
+        activity.showTouchPauseMenu();
+        activity.startCheckpointSave();
+        joinWorker();
+        button(ShadowAlertDialog.getLatestAlertDialog().getWindow().getDecorView(), "Nueva partida guardada").performClick();
+        AlertDialog naming = ShadowAlertDialog.getLatestAlertDialog();
+        naming.getButton(AlertDialog.BUTTON_POSITIVE).performClick();
+        assertTrue(naming.isShowing());
+        assertNotNull(findName(naming.getWindow().getDecorView()).getError());
+        assertFalse(checkpoint(".request").exists());
+    }
+
+    @Test public void savedAcknowledgementAddsAnotherNamedSlotBeforeExit() throws Exception {
+        nativeCheckpoint(1);
+        CheckpointSlots.Entry first = slots.saveNew("Primera");
+        String id = save();
+        waitForRequest();
+        assertEquals(1, slots.list().size());
+        nativeCheckpoint(2);
+        acknowledge(id);
+        assertEquals(2, slots.list().size());
+        assertTrue(slots.list().stream().anyMatch(entry -> entry.id.equals(first.id) && entry.name.equals("Primera")));
+        assertTrue(slots.list().stream().anyMatch(entry -> entry.name.equals("Mi partida")));
+        assertNotNull(shadowOf(activity).getNextStartedActivity());
+    }
+
+    @Test public void failedArchiveKeepsNewWorkingCheckpointAndOtherSlotsWithoutExit() throws Exception {
+        nativeCheckpoint(1);
+        CheckpointSlots.Entry first = slots.saveNew("Primera");
+        activity.beginCheckpointSave("0123456789abcdef0123456789abcdef", "Destino no disponible");
+        String id = ReflectionHelpers.getField(activity, "checkpointRequestId");
+        waitForRequest();
+        nativeCheckpoint(2);
+        acknowledge(id);
+        assertEquals(1, slots.list().size());
+        assertEquals(first.id, slots.list().get(0).id);
+        assertEquals(CheckpointStore.Kind.READY, store.inspect().kind);
+        assertNull(shadowOf(activity).getNextStartedActivity());
+        assertTrue(shadowOf(ShadowAlertDialog.getLatestAlertDialog()).getMessage().toString()
+            .contains("copia de recuperación"));
+    }
+
+    @Test public void replacingNamedSlotRequiresConfirmationAndPreservesItsIdentity() throws Exception {
+        nativeCheckpoint(1);
+        CheckpointSlots.Entry first = slots.saveNew("Primera");
+        activity.showTouchPauseMenu();
+        activity.startCheckpointSave();
+        joinWorker();
+        button(ShadowAlertDialog.getLatestAlertDialog().getWindow().getDecorView(), SaveLabels.label(first)).performClick();
+        AlertDialog confirm = ShadowAlertDialog.getLatestAlertDialog();
+        assertEquals("Reemplazar partida", shadowOf(confirm).getTitle());
+        assertFalse(checkpoint(".request").exists());
+        assertEquals(first.id, slots.list().get(0).id);
+        confirm.getButton(AlertDialog.BUTTON_POSITIVE).performClick();
+        shadowOf(Looper.getMainLooper()).idle();
+        String id = ReflectionHelpers.getField(activity, "checkpointRequestId");
+        waitForRequest();
+        nativeCheckpoint(2);
+        acknowledge(id);
+        assertEquals(1, slots.list().size());
+        assertEquals(first.id, slots.list().get(0).id);
+        assertEquals("Primera", slots.list().get(0).name);
+        assertNotNull(shadowOf(activity).getNextStartedActivity());
+    }
+
+    @Test public void fullChooserDisablesNewAndKeepsExplicitReplaceAvailable() {
+        java.util.List<CheckpointSlots.Entry> entries = new java.util.ArrayList<>();
+        for (int index = 0; index < CheckpointSlots.MAX_SLOTS; index++)
+            entries.add(new CheckpointSlots.Entry(CheckpointStore.newId(), "Partida " + index,
+                System.currentTimeMillis(), new CheckpointStore.Candidate(CheckpointStore.Kind.READY,
+                    "levels\\demob30\\demob30", 1), new byte[32]));
+        ReflectionHelpers.callInstanceMethod(activity, "showCheckpointSaveChoices",
+            ReflectionHelpers.ClassParameter.from(java.util.List.class, entries));
+        AlertDialog chooser = ShadowAlertDialog.getLatestAlertDialog();
+        assertFalse(button(chooser.getWindow().getDecorView(), "Nueva partida guardada").isEnabled());
+        assertTrue(button(chooser.getWindow().getDecorView(), SaveLabels.label(entries.get(0))).isEnabled());
     }
 
     @Test public void onlyMatchingSavedAcknowledgementExitsWithoutRestart() {

@@ -51,6 +51,7 @@ public class LauncherActivity extends Activity {
     private Button pick;
     private final Handler handler = new Handler(Looper.getMainLooper());
     private CheckpointStore checkpointStore;
+    private CheckpointSlots checkpointSlots;
     private boolean checkpointChoiceStarted, checkpointPreparing;
     private Thread checkpointWorker;
     private boolean demoRequested;
@@ -162,10 +163,21 @@ public class LauncherActivity extends Activity {
                     return;
                 }
                 CheckpointStore.Candidate candidate = invite ? null : store.inspect();
+                java.util.List<CheckpointSlots.Entry> saves = java.util.Collections.emptyList();
+                if (!invite) {
+                    if (candidate.kind == CheckpointStore.Kind.READY || candidate.kind == CheckpointStore.Kind.INCOMPATIBLE)
+                        checkpointSlots().preserveLegacy();
+                    saves = checkpointSlots().list();
+                }
+                java.util.List<CheckpointSlots.Entry> choices = saves;
                 handler.post(() -> {
                     if (isFinishing() || isDestroyed())
                         return;
-                    if (candidate == null || candidate.kind == CheckpointStore.Kind.ABSENT)
+                    if (candidate == null)
+                        launchGame(null);
+                    else if (!choices.isEmpty())
+                        showSavedGames(choices);
+                    else if (candidate.kind == CheckpointStore.Kind.ABSENT)
                         launchGame(null);
                     else
                         showCheckpointChoice(candidate);
@@ -207,21 +219,55 @@ public class LauncherActivity extends Activity {
                 .setNegativeButton("Cancelar", null).show();
             return;
         }
-        if (!haveDemo())
-            return;
-        demoRequested = true;
-        startGameAfterDriver();
+        DataPackages.playDemo(this, () -> {
+            if (isFinishing() || isDestroyed())
+                return;
+            demoRequested = true;
+            startGameAfterDriver();
+        }, dialog -> dialog.show());
     }
 
     private boolean haveDemo() {
-        return haveData() && new File(dataRoot, "maps/demob30.map").isFile()
-            && new File(dataRoot, "maps/demob30.map").length() > 0;
+        return dataRoot != null && GameDataPackage.demoAvailable(dataRoot);
     }
 
     private CheckpointStore checkpointStore() throws java.io.IOException {
         if (checkpointStore == null)
             checkpointStore = new CheckpointStore(dataRoot, name -> getAssets().open(name));
         return checkpointStore;
+    }
+
+    private CheckpointSlots checkpointSlots() throws java.io.IOException {
+        if (checkpointSlots == null)
+            checkpointSlots = new CheckpointSlots(dataRoot, checkpointStore());
+        return checkpointSlots;
+    }
+
+    void showSavedGames(java.util.List<CheckpointSlots.Entry> saves) {
+        String[] labels = new String[saves.size()];
+        for (int i = 0; i < labels.length; i++)
+            labels[i] = SaveLabels.label(saves.get(i));
+        AlertDialog dialog = new AlertDialog.Builder(this).setTitle("Partidas guardadas")
+            .setItems(labels, (d, which) -> {
+                CheckpointSlots.Entry entry = saves.get(which);
+                if (entry.candidate.kind == CheckpointStore.Kind.READY) {
+                    prepareCheckpointBoot(entry.candidate, true, entry.id);
+                } else {
+                    AlertDialog unavailable = new AlertDialog.Builder(this).setTitle("Partida no disponible")
+                        .setMessage("El guardado se conserva, pero está dañado o pertenece a otro motor gráfico o versión.")
+                        .setPositiveButton("Volver", (back, button) -> showSavedGames(saves)).show();
+                    unavailable.setOnCancelListener(back -> resetLaunchChoice());
+                }
+            })
+            .setNeutralButton("Nueva partida", (d, which) -> prepareCheckpointBoot(null, false))
+            .setNegativeButton("Volver", (d, which) -> resetLaunchChoice()).create();
+        dialog.setOnCancelListener(d -> resetLaunchChoice());
+        dialog.show();
+    }
+
+    private void resetLaunchChoice() {
+        checkpointChoiceStarted = false;
+        driverStarted = false;
     }
 
     boolean hasRunningGame() {
@@ -269,6 +315,10 @@ public class LauncherActivity extends Activity {
     }
 
     private void prepareCheckpointBoot(CheckpointStore.Candidate candidate, boolean resume) {
+        prepareCheckpointBoot(candidate, resume, null);
+    }
+
+    private void prepareCheckpointBoot(CheckpointStore.Candidate candidate, boolean resume, String slotId) {
         if (checkpointPreparing || gameStarted || isFinishing() || isDestroyed())
             return;
         checkpointPreparing = true;
@@ -278,6 +328,8 @@ public class LauncherActivity extends Activity {
         String id = CheckpointStore.newId();
         checkpointWorker = new Thread(() -> {
             try {
+                if (slotId != null)
+                    checkpointSlots().activate(slotId);
                 checkpointStore().writeBoot(id, resume);
                 handler.post(() -> {
                     if (isFinishing() || isDestroyed())
@@ -288,8 +340,17 @@ public class LauncherActivity extends Activity {
             } catch (java.io.IOException e) {
                 handler.post(() -> {
                     preparing.dismiss();
+                    if (isFinishing() || isDestroyed())
+                        return;
                     checkpointPreparing = false;
-                    checkpointLaunchError(candidate);
+                    if (slotId == null) {
+                        checkpointLaunchError(candidate);
+                    } else {
+                        resetLaunchChoice();
+                        new AlertDialog.Builder(this).setTitle("No se pudo abrir la partida")
+                            .setMessage("Tus partidas se conservan. Comprueba el espacio disponible y vuelve a intentarlo.")
+                            .setPositiveButton("Aceptar", null).show();
+                    }
                 });
             }
         }, "checkpoint boot request");
@@ -434,8 +495,8 @@ public class LauncherActivity extends Activity {
 
         TextView message = new TextView(this);
         message.setText(haveData()
-            ? "Jugar / Continuar permite retomar tu punto de control. Jugar demo inicia la misión de demostración desde el principio.\n\n"
-                + "Guardar y salir reemplaza el punto de control anterior."
+            ? "Jugar / Continuar permite elegir una de tus partidas guardadas. Jugar demo inicia la misión de demostración desde el principio.\n\n"
+                + "Puedes conservar hasta 10 partidas con nombre desde Guardar y salir."
             : "Choose an Xbox disc image of Halo: Combat Evolved (an .iso or .xiso file, any "
             + "version) on this device. Its maps folder is copied into the app's storage (about 1.8 GB), "
             + "and you can delete the image afterwards.\n\n"
@@ -457,13 +518,12 @@ public class LauncherActivity extends Activity {
         layout.addView(play);
 
         Button demo = new Button(this);
-        demo.setText("Jugar demo");
-        demo.setEnabled(haveDemo());
+        demo.setText(haveDemo() ? "Jugar demo" : "Descargar y jugar demo");
         demo.setOnClickListener(v -> startDemo());
         layout.addView(demo);
         if (!haveDemo()) {
             TextView demoHelp = new TextView(this);
-            demoHelp.setText("Instala los datos de la demo para habilitar Jugar demo.");
+            demoHelp.setText("Descarga la demo promocional directamente en este teléfono (aprox. 380 MB). Necesitas conexión y espacio para instalarla.");
             demoHelp.setTextColor(Color.LTGRAY);
             demoHelp.setGravity(Gravity.CENTER);
             layout.addView(demoHelp);

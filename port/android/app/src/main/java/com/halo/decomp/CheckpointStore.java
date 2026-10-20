@@ -102,17 +102,25 @@ final class CheckpointStore {
     }
 
     Candidate inspect() throws IOException {
-        File slot = file(".bin");
+        return inspect(file(".bin"), 0);
+    }
+
+    File checkpointFile() { return file(".bin"); }
+
+    Candidate inspect(File slot, long offset) throws IOException {
+        if (offset < 0)
+            throw new IOException("Desplazamiento de guardado no válido.");
         if (!slot.exists())
             return new Candidate(Kind.ABSENT, "", 0);
-        if (!slot.isFile() || slot.length() < HEADER_SIZE)
+        if (!slot.isFile() || slot.length() - offset < HEADER_SIZE)
             return new Candidate(Kind.CORRUPT, "", 0);
         byte[] header = new byte[HEADER_SIZE];
         try (FileInputStream in = new FileInputStream(slot)) {
-            int offset = 0, count;
-            while (offset < header.length && (count = in.read(header, offset, header.length - offset)) > 0)
-                offset += count;
-            if (offset != HEADER_SIZE)
+            in.getChannel().position(offset);
+            int read = 0, count;
+            while (read < header.length && (count = in.read(header, read, header.length - read)) > 0)
+                read += count;
+            if (read != HEADER_SIZE)
                 return new Candidate(Kind.CORRUPT, "", 0);
         }
         ByteBuffer fields = ByteBuffer.wrap(header).order(ByteOrder.LITTLE_ENDIAN);
@@ -127,7 +135,7 @@ final class CheckpointStore {
             zeroTail &= header[index] == 0;
         if (!Arrays.equals(Arrays.copyOf(header, 8), "OCESAVE1".getBytes(StandardCharsets.US_ASCII))
                 || fields.getInt(8) != 1 || fields.getInt(12) != HEADER_SIZE
-                || imageSize != IMAGE_SIZE || slot.length() != HEADER_SIZE + imageSize
+                || imageSize != IMAGE_SIZE || slot.length() - offset != HEADER_SIZE + imageSize
                 || difficulty < 0 || difficulty > 3 || renderer < 0 || renderer > 1
                 || end == 352 || !zeroTail || !map.matches("(?:levels|custom_maps)\\\\[A-Za-z0-9_\\\\-]+")
                 || map.endsWith("\\") || !hash(fingerprint))

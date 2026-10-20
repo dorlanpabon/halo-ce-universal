@@ -41,8 +41,10 @@ public class DemoLauncherHostTest {
     public static class TestLauncher extends LauncherActivity {
         boolean running;
         File privateRoot;
+        File root;
         @Override boolean hasRunningGame() { return running; }
         @Override public File getFilesDir() { return privateRoot; }
+        @Override public File getExternalFilesDir(String type) { return root; }
     }
 
     @Before public void prepare() throws Exception {
@@ -50,13 +52,18 @@ public class DemoLauncherHostTest {
         privateRoot = temporary.newFolder();
         assertTrue(new File(root, "maps").mkdir());
         assertTrue(new File(root, "save/z").mkdirs());
-        write("maps/ui.map", "ui");
-        write("maps/demob30.map", "demo");
+        byte[] map = new byte[0x800];
+        java.nio.ByteBuffer.wrap(map).order(java.nio.ByteOrder.LITTLE_ENDIAN)
+            .putInt(0, 0x68656164).putInt(4, 5).putInt(8, 0x800)
+            .putInt(0x10, 0x800).putInt(0x14, 0).putInt(0x7fc, 0x666f6f74);
+        Files.write(new File(root, "maps/ui.map").toPath(), map);
+        Files.write(new File(root, "maps/demob30.map").toPath(), map);
         write("vk_driver_auto.txt", "none\n");
         write("init.txt", INIT);
         write("save/z/mobile-checkpoint.bin", "existing checkpoint");
         activity = Robolectric.buildActivity(TestLauncher.class).get();
         activity.privateRoot = privateRoot;
+        activity.root = root;
         activity.setIntent(new Intent());
         ReflectionHelpers.setField(activity, "dataRoot", root);
         ReflectionHelpers.setField(activity, "checkpointStore", new CheckpointStore(root,
@@ -115,10 +122,9 @@ public class DemoLauncherHostTest {
         assertTrue(button(view, "Jugar demo").isEnabled());
     }
 
-    @Test public void missingDemoCannotStartAndDoesNotChangeStartup() throws Exception {
+    @Test public void missingDemoOffersDownloadWithoutChangingStartupBeforeClick() throws Exception {
         assertTrue(new File(root, "maps/demob30.map").delete());
-        assertFalse(button(screen(), "Jugar demo").isEnabled());
-        activity.startDemo();
+        assertTrue(button(screen(), "Descargar y jugar demo").isEnabled());
         assertNull(shadowOf(activity).getNextStartedActivity());
         assertEquals(INIT, read("init.txt"));
         assertFalse(new File(root, "save/z/mobile-checkpoint.boot").exists());
