@@ -53,6 +53,8 @@ public class LauncherActivity extends Activity {
     private CheckpointStore checkpointStore;
     private boolean checkpointChoiceStarted, checkpointPreparing;
     private Thread checkpointWorker;
+    private boolean demoRequested;
+    private String demoBootId;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -65,7 +67,10 @@ public class LauncherActivity extends Activity {
         passOnHardwareId();
         passOnInvite(getIntent());
         Updater.moveToVulkanDefault(dataRoot);
-        if (haveData()) {
+        if (haveData() && (hasRunningGame()
+                || (Intent.ACTION_VIEW.equals(getIntent().getAction()) && getIntent().getData() != null)
+                || getIntent().getBooleanExtra("resume-after-graphics", false))) {
+            demoRequested = !hasRunningGame() && getIntent().getBooleanExtra("launch-demo", false);
             startGameAfterDriver();
             return;
         }
@@ -141,9 +146,21 @@ public class LauncherActivity extends Activity {
         boolean invite = Intent.ACTION_VIEW.equals(getIntent().getAction()) && getIntent().getData() != null;
         checkpointWorker = new Thread(() -> {
             try {
+                DemoLaunch demo = new DemoLaunch(dataRoot, getFilesDir());
+                demo.recover();
                 CheckpointStore store = checkpointStore();
                 // A request abandoned before the engine started must not be replayed on a later launch.
                 store.clearAbandonedRequests();
+                if (demoRequested) {
+                    String id = CheckpointStore.newId();
+                    store.writeBoot(id, false);
+                    demo.prepare(id);
+                    handler.post(() -> {
+                        demoBootId = id;
+                        launchGame(null);
+                    });
+                    return;
+                }
                 CheckpointStore.Candidate candidate = invite ? null : store.inspect();
                 handler.post(() -> {
                     if (isFinishing() || isDestroyed())
@@ -154,10 +171,51 @@ public class LauncherActivity extends Activity {
                         showCheckpointChoice(candidate);
                 });
             } catch (java.io.IOException e) {
-                handler.post(() -> checkpointLaunchError(null));
+                if (demoRequested) {
+                    try {
+                        checkpointStore().clearBoot();
+                        new DemoLaunch(dataRoot, getFilesDir()).recover();
+                    } catch (java.io.IOException ignored) { }
+                }
+                handler.post(() -> {
+                    if (isFinishing() || isDestroyed())
+                        return;
+                    if (demoRequested) {
+                        checkpointChoiceStarted = false;
+                        driverStarted = false;
+                        demoRequested = false;
+                        new AlertDialog.Builder(this).setTitle("Demo no disponible")
+                            .setMessage("No se pudo preparar la demo. Comprueba que sus datos estén instalados.")
+                            .setPositiveButton("Aceptar", null).show();
+                    } else {
+                        checkpointLaunchError(null);
+                    }
+                });
             }
         }, "checkpoint startup");
         checkpointWorker.start();
+    }
+
+    void startDemo() {
+        if (gameStarted || checkpointChoiceStarted || driverStarted || isFinishing() || isDestroyed()
+                || DataPackages.isBusy())
+            return;
+        if (hasRunningGame()) {
+            new AlertDialog.Builder(this).setTitle("Hay una partida abierta")
+                .setMessage("Guarda y sal de la partida antes de iniciar la demo.")
+                .setPositiveButton("Volver a la partida", (d, which) -> launchGame(null))
+                .setNegativeButton("Cancelar", null).show();
+            return;
+        }
+        if (!haveDemo())
+            return;
+        demoRequested = true;
+        startGameAfterDriver();
+    }
+
+    private boolean haveDemo() {
+        return haveData() && new File(dataRoot, "maps/demob30.map").isFile()
+            && new File(dataRoot, "maps/demob30.map").length() > 0;
     }
 
     private CheckpointStore checkpointStore() throws java.io.IOException {
@@ -256,6 +314,8 @@ public class LauncherActivity extends Activity {
         Intent game = new Intent(this, HaloActivity.class);
         if (bootId != null)
             game.putExtra(HaloActivity.CHECKPOINT_BOOT_ID, bootId);
+        if (demoBootId != null)
+            game.putExtra(HaloActivity.DEMO_BOOT_ID, demoBootId);
         startActivity(game);
         finish();
     }
@@ -366,14 +426,17 @@ public class LauncherActivity extends Activity {
         layout.setBackgroundColor(Color.rgb(12, 16, 20));
 
         TextView title = new TextView(this);
-        title.setText("Halo needs its game data");
+        title.setText(haveData() ? "Halo: Combat Evolved" : "Halo necesita sus datos de juego");
         title.setTextColor(Color.WHITE);
         title.setTextSize(TypedValue.COMPLEX_UNIT_SP, 24);
         title.setGravity(Gravity.CENTER);
         layout.addView(title);
 
         TextView message = new TextView(this);
-        message.setText("Choose an Xbox disc image of Halo: Combat Evolved (an .iso or .xiso file, any "
+        message.setText(haveData()
+            ? "Jugar / Continuar permite retomar tu punto de control. Jugar demo inicia la misión de demostración desde el principio.\n\n"
+                + "Guardar y salir reemplaza el punto de control anterior."
+            : "Choose an Xbox disc image of Halo: Combat Evolved (an .iso or .xiso file, any "
             + "version) on this device. Its maps folder is copied into the app's storage (about 1.8 GB), "
             + "and you can delete the image afterwards.\n\n"
             + "You can also copy a maps folder from a computer:\n"
@@ -384,8 +447,31 @@ public class LauncherActivity extends Activity {
         message.setPadding(0, dp(16), 0, dp(16));
         layout.addView(message);
 
+        Button play = new Button(this);
+        play.setText("Jugar / Continuar");
+        play.setEnabled(haveData());
+        play.setOnClickListener(v -> {
+            if (!DataPackages.isBusy())
+                startGameAfterDriver();
+        });
+        layout.addView(play);
+
+        Button demo = new Button(this);
+        demo.setText("Jugar demo");
+        demo.setEnabled(haveDemo());
+        demo.setOnClickListener(v -> startDemo());
+        layout.addView(demo);
+        if (!haveDemo()) {
+            TextView demoHelp = new TextView(this);
+            demoHelp.setText("Instala los datos de la demo para habilitar Jugar demo.");
+            demoHelp.setTextColor(Color.LTGRAY);
+            demoHelp.setGravity(Gravity.CENTER);
+            layout.addView(demoHelp);
+        }
+
         pick = new Button(this);
         pick.setText("Elegir imagen de disco");
+        pick.setEnabled(!haveData());
         pick.setOnClickListener(v -> {
             if (DataPackages.isBusy())
                 return;
@@ -402,8 +488,8 @@ public class LauncherActivity extends Activity {
         Button download = new Button(this);
         download.setText("Descargar paquete de datos");
         download.setOnClickListener(v -> {
-            if (pick.isEnabled())
-                DataPackages.show(this, this::startGameAfterDriver, dialog -> dialog.show());
+            if (!DataPackages.isBusy())
+                DataPackages.show(this, this::buildInterface, dialog -> dialog.show());
         });
         layout.addView(download);
         Button update = new Button(this);
@@ -437,7 +523,7 @@ public class LauncherActivity extends Activity {
         super.onResume();
         // data pushed with adb while this screen was open
         if (pick != null && pick.isEnabled() && !DataPackages.isBusy() && haveData())
-            startGameAfterDriver();
+            buildInterface();
     }
 
     @Override

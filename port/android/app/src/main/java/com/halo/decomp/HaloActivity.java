@@ -57,6 +57,7 @@ public class HaloActivity extends SDLActivity {
     private AlertDialog touchPauseDialog;
     private boolean activityResumed;
     static final String CHECKPOINT_BOOT_ID = "checkpoint-boot-id";
+    static final String DEMO_BOOT_ID = "demo-boot-id";
     private final Handler checkpointHandler = new Handler(Looper.getMainLooper());
     private CheckpointStore checkpointStore;
     private String checkpointRequestId;
@@ -65,10 +66,12 @@ public class HaloActivity extends SDLActivity {
     private AlertDialog checkpointErrorDialog;
     private Thread checkpointWorker;
     private Runnable checkpointDeadline;
+    private Thread demoWorker;
 
     void restartForGraphicsProfile() {
         Intent restart = new Intent(this, ProfileRestartActivity.class);
         restart.putExtra("game-pid", android.os.Process.myPid());
+        restart.putExtra("launch-demo", getIntent().hasExtra(DEMO_BOOT_ID));
         startActivity(restart);
         finishAndRemoveTask();
     }
@@ -186,7 +189,8 @@ public class HaloActivity extends SDLActivity {
         text.setTextColor(Color.WHITE);
         text.setGravity(Gravity.CENTER);
         text.setPadding(24, 24, 24, 24);
-        text.setText(restoring ? "Continuando desde el último punto de control…"
+        text.setText(restoring ? (getIntent().hasExtra(DEMO_BOOT_ID) ? "Iniciando la demo…"
+            : "Continuando desde el último punto de control…")
             : "Guardando el último punto de control…\nLa aplicación se cerrará cuando el juego lo confirme.");
         progress.addView(text);
         checkpointProgress = progress;
@@ -304,6 +308,9 @@ public class HaloActivity extends SDLActivity {
         if (checkpointWorker != null)
             checkpointWorker.interrupt();
         checkpointWorker = null;
+        if (demoWorker != null)
+            demoWorker.interrupt();
+        demoWorker = null;
     }
 
     void exitCheckpointGame() {
@@ -339,8 +346,33 @@ public class HaloActivity extends SDLActivity {
             beginCheckpointOperation(bootId, true);
             watchCheckpoint(bootId, true);
         }
+        String demoId = getIntent().getStringExtra(DEMO_BOOT_ID);
+        if (demoId != null && demoId.matches("[0-9a-f]{32}"))
+            watchDemoLaunch(demoId);
         // a new version looked for while the game starts
         Updater.start(this);
+    }
+
+    private void watchDemoLaunch(String id) {
+        beginCheckpointOperation(id, true);
+        demoWorker = new Thread(() -> {
+            try {
+                DemoLaunch demo = new DemoLaunch(getExternalFilesDir(null), getFilesDir());
+                while (!Thread.currentThread().isInterrupted()) {
+                    if (demo.restoreIfAcknowledged()) {
+                        checkpointHandler.post(() -> completeCheckpoint(id, "resumed"));
+                        return;
+                    }
+                    Thread.sleep(200);
+                }
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            } catch (IOException e) {
+                // The cold launcher recovers the original script after an interrupted launch.
+                checkpointHandler.post(() -> completeCheckpoint(id, "io_error"));
+            }
+        }, "demo startup");
+        demoWorker.start();
     }
 
     /** the system's file picker, for the touch layout; no storage permission */
@@ -490,6 +522,8 @@ public class HaloActivity extends SDLActivity {
 
     @Override
     protected void onDestroy() {
+        if (demoWorker != null)
+            demoWorker.interrupt();
         checkpointRequestId = null;
         stopCheckpointWatch();
         if (touchControls != null)
