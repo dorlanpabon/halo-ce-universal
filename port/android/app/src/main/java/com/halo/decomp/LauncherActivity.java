@@ -17,6 +17,7 @@ import android.view.View;
 import android.widget.Button;
 import android.widget.LinearLayout;
 import android.widget.ProgressBar;
+import android.widget.ScrollView;
 import android.widget.TextView;
 
 import java.io.File;
@@ -386,6 +387,8 @@ public class LauncherActivity extends Activity {
         pick = new Button(this);
         pick.setText("Choose disc image");
         pick.setOnClickListener(v -> {
+            if (DataPackages.isBusy())
+                return;
             // (disc images have no MIME type of their own: any file, checked
             // when it is read)
             Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
@@ -395,6 +398,18 @@ public class LauncherActivity extends Activity {
         });
         layout.addView(pick, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT,
             LinearLayout.LayoutParams.WRAP_CONTENT));
+
+        Button download = new Button(this);
+        download.setText("Descargar paquete de datos");
+        download.setOnClickListener(v -> {
+            if (pick.isEnabled())
+                DataPackages.show(this, this::startGameAfterDriver, dialog -> dialog.show());
+        });
+        layout.addView(download);
+        Button update = new Button(this);
+        update.setText("Buscar actualización de la APK");
+        update.setOnClickListener(v -> ControlsUpdater.show(this, dialog -> dialog.show()));
+        layout.addView(update);
 
         progress = new ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal);
         progress.setMax(1000);
@@ -410,7 +425,10 @@ public class LauncherActivity extends Activity {
         status.setPadding(0, dp(8), 0, 0);
         layout.addView(status);
 
-        setContentView(layout);
+        ScrollView scroll = new ScrollView(this);
+        scroll.setFillViewport(true);
+        scroll.addView(layout);
+        setContentView(scroll);
         pick.requestFocus();
     }
 
@@ -418,7 +436,7 @@ public class LauncherActivity extends Activity {
     protected void onResume() {
         super.onResume();
         // data pushed with adb while this screen was open
-        if (pick != null && pick.isEnabled() && haveData())
+        if (pick != null && pick.isEnabled() && !DataPackages.isBusy() && haveData())
             startGameAfterDriver();
     }
 
@@ -426,6 +444,8 @@ public class LauncherActivity extends Activity {
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
         if (requestCode != PICK_IMAGE || resultCode != RESULT_OK || data == null || data.getData() == null)
+            return;
+        if (DataPackages.isBusy())
             return;
         Uri image = data.getData();
         pick.setEnabled(false);

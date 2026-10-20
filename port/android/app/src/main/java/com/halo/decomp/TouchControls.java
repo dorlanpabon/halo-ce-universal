@@ -1032,7 +1032,8 @@ public final class TouchControls extends View implements SensorEventListener, In
 
     void showOptions() {
         String[] items = {"Controles predefinidos", "Perfiles gráficos", "Pantalla y resolución", "General",
-            "HUD personalizado", "Sensibilidad al mirar", "Exportar HUD", "Importar HUD"};
+            "HUD personalizado", "Sensibilidad al mirar", "Exportar HUD", "Importar HUD",
+            "Descargar paquete de datos", "Actualizar APK"};
         AlertDialog dialog = new AlertDialog.Builder(getContext())
             .setTitle("Halo · Controles")
             .setItems(items, (d, which) -> {
@@ -1050,8 +1051,12 @@ public final class TouchControls extends View implements SensorEventListener, In
                     post(this::beginEditor);
                 } else if (which == 5) {
                     post(this::showSensitivity);
-                } else {
+                } else if (which == 6 || which == 7) {
                     ((HaloActivity) getContext()).chooseLayoutFile(which == 6, exportLayout());
+                } else if (which == 8) {
+                    post(() -> DataPackages.show((HaloActivity) getContext(), () -> {}, this::openDialog));
+                } else if (which == 9) {
+                    post(() -> ControlsUpdater.show((HaloActivity) getContext(), this::openDialog));
                 }
             })
             .setNegativeButton("Cerrar", null)

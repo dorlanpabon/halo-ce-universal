@@ -89,6 +89,20 @@ To install the data with the app:
    game starts.
 6. You can delete the disc image.
 
+Alternatively, **Descargar paquete de datos** on the first screen or in touch
+settings downloads a player's HTTPS URL directly on the phone. It accepts an
+Xbox ISO/XISO or a ZIP containing one `maps/` folder (Xbox map format 5, at most
+2 GiB of extracted data). It validates and stages the maps before installation;
+existing maps, saves and configuration are not replaced. No game data or preset
+commercial download URL is included.
+
+The separately signed `.controls` edition also has **Actualizar APK** in both
+places. Its channel is `dorlanpabon/halo-ce-universal`, release tags `controles-N`
+with a `halo-controls.apk` asset and version code `10600 + N`. Draft and
+prerelease releases are ignored. Before opening Android's installer it checks
+the downloaded package ID, newer version and current signing certificates. The
+standard edition retains its existing updater.
+
 To install the data from a computer:
 
 1. Start the app one time. The app makes its folders.
