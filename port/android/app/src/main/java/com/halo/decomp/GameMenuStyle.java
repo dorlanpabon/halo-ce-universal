@@ -59,7 +59,7 @@ final class GameMenuStyle {
             Button button = dialog.getButton(action);
             if (button != null && button.getLayoutParams() instanceof ViewGroup.MarginLayoutParams) {
                 ViewGroup.MarginLayoutParams params = (ViewGroup.MarginLayoutParams) button.getLayoutParams();
-                params.setMargins(dp(button, 4), dp(button, 4), dp(button, 4), dp(button, 4));
+                params.setMargins(dp(button, 4), 0, dp(button, 4), 0);
                 button.setLayoutParams(params);
             }
         }
