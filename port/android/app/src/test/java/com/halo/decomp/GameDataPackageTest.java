@@ -351,4 +351,110 @@ public class GameDataPackageTest {
         Files.write(archive.toPath(), new byte[2]);
         rejected(archive);
     }
+
+    private File demoZip() throws Exception {
+        return zip(new String[] { "Halo Demo/maps/demoui.map", "Halo Demo/maps/demob30.map" },
+            new byte[][] { map(), map() });
+    }
+
+    private void demo(File archive) throws IOException {
+        GameDataPackage.installDemo(archive, root, new AtomicBoolean(), (file, done, total) -> {});
+    }
+
+    @Test public void demoAddsItsMapsAndIsReadyWithoutAnInitScript() throws Exception {
+        assertFalse(GameDataPackage.demoAvailable(root));
+        demo(demoZip());
+        assertTrue(GameDataPackage.demoAvailable(root));
+        assertFalse(new File(root, "init.txt").exists());
+        assertFalse(new File(root, "maps/demoui.map").exists());
+        assertNoStage();
+    }
+
+    @Test public void demoPreservesRetailUiMapsConfigAndSavedGames() throws Exception {
+        assertTrue(new File(root, "maps").mkdir());
+        byte[] retailUi = map();
+        retailUi[100] = 9;
+        Files.write(new File(root, "maps/ui.map").toPath(), retailUi);
+        write(new File(root, "maps/a10.map"), "retail map");
+        write(new File(root, "maps/loading.tga"), "retail loading");
+        write(new File(root, "init.txt"), "player init");
+        write(new File(root, "config.toml"), "player config");
+        write(new File(root, "save/z/checkpoint.bin"), "checkpoint");
+        demo(demoZip());
+        assertArrayEquals(retailUi, Files.readAllBytes(new File(root, "maps/ui.map").toPath()));
+        assertEquals("retail map", read(new File(root, "maps/a10.map")));
+        assertEquals("retail loading", read(new File(root, "maps/loading.tga")));
+        assertEquals("player init", read(new File(root, "init.txt")));
+        assertEquals("player config", read(new File(root, "config.toml")));
+        assertEquals("checkpoint", read(new File(root, "save/z/checkpoint.bin")));
+        assertTrue(GameDataPackage.demoAvailable(root));
+        assertNoStage();
+    }
+
+    @Test public void demoNeverReplacesAnExistingDemoMap() throws Exception {
+        assertTrue(new File(root, "maps").mkdir());
+        byte[] current = map();
+        current[100] = 7;
+        Files.write(new File(root, "maps/demob30.map").toPath(), current);
+        demo(demoZip());
+        assertArrayEquals(current, Files.readAllBytes(new File(root, "maps/demob30.map").toPath()));
+        assertTrue(GameDataPackage.demoAvailable(root));
+        assertNoStage();
+    }
+
+    @Test public void failedDemoMergeRollsBackOnlyItsOwnNewMap() throws Exception {
+        write(new File(root, "maps/ui.map"), "preserve invalid player UI");
+        write(new File(root, "maps/a10.map"), "keep");
+        try { demo(demoZip()); fail("Do not replace existing UI"); }
+        catch (IOException expected) {
+            assertEquals("preserve invalid player UI", read(new File(root, "maps/ui.map")));
+            assertEquals("keep", read(new File(root, "maps/a10.map")));
+            assertFalse(new File(root, "maps/demob30.map").exists());
+            assertFalse(GameDataPackage.demoAvailable(root));
+            assertNoStage();
+        }
+    }
+
+    @Test public void retailArchiveCannotBeInstalledAsTheDemo() throws Exception {
+        try { demo(validZip()); fail("Must contain demob30"); }
+        catch (IOException expected) {
+            assertFalse(new File(root, "maps/ui.map").exists());
+            assertFalse(new File(root, "maps/b30.map").exists());
+            assertNoStage();
+        }
+    }
+
+    @Test public void demoMergeDoesNotPublishOtherMapsFromTheArchive() throws Exception {
+        demo(zip(new String[] { "maps/demoui.map", "maps/demob30.map", "maps/a10.map" },
+            new byte[][] { map(), map(), map() }));
+        assertTrue(GameDataPackage.demoAvailable(root));
+        assertFalse(new File(root, "maps/a10.map").exists());
+        assertNoStage();
+    }
+
+    @Test public void cancelingDemoExtractionLeavesCurrentGameUntouched() throws Exception {
+        write(new File(root, "maps/a10.map"), "keep map");
+        write(new File(root, "save/z/checkpoint.bin"), "keep save");
+        AtomicBoolean canceled = new AtomicBoolean();
+        try {
+            GameDataPackage.installDemo(demoZip(), root, canceled, (file, done, total) -> canceled.set(true));
+            fail("Canceled");
+        } catch (InterruptedIOException expected) {
+            assertEquals("keep map", read(new File(root, "maps/a10.map")));
+            assertEquals("keep save", read(new File(root, "save/z/checkpoint.bin")));
+            assertFalse(new File(root, "maps/demob30.map").exists());
+            assertFalse(new File(root, "maps/ui.map").exists());
+            assertNoStage();
+        }
+    }
+
+    @Test public void demoReadinessChecksXboxHeadersNotOnlyFileNames() throws Exception {
+        write(new File(root, "maps/ui.map"), "not a map");
+        write(new File(root, "maps/demob30.map"), "not a map");
+        assertFalse(GameDataPackage.demoAvailable(root));
+        Files.write(new File(root, "maps/ui.map").toPath(), map());
+        assertFalse(GameDataPackage.demoAvailable(root));
+        Files.write(new File(root, "maps/demob30.map").toPath(), map());
+        assertTrue(GameDataPackage.demoAvailable(root));
+    }
 }

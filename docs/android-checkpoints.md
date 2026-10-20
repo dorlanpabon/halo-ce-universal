@@ -12,15 +12,25 @@ Returning to an already running game and multiplayer invitations bypass this
 choice. A failed restore displays an error and requires exiting; it never claims
 to have continued a newly started map.
 
-The cold launcher also offers **Jugar demo** when `maps/ui.map` and
-`maps/demob30.map` are installed. It starts a new demo without loading or
-replacing the saved checkpoint; **Guardar y salir** can subsequently replace
-that single slot, as the launcher explains. Demo startup journals `init.txt`
+The cold launcher offers **Descargar y jugar demo** when demo maps are missing.
+It downloads the archived OXM promotional demo directly on Android, checks its
+pinned size and SHA256, and adds only missing demo files. Existing maps and
+settings are retained. With data installed, **Jugar demo** starts a new demo
+without loading or replacing saved checkpoints. Demo startup journals `init.txt`
 privately and temporarily replaces only its map command. Input stays blocked
 until the engine acknowledges the matching `new` request, then the original
 script is restored. An interrupted launch is recovered before the next cold
 start. Existing game sessions must be saved and closed before changing to the
-demo. No maps or download URLs are bundled.
+demo. No maps are bundled in the APK.
+
+**Guardar y salir** offers up to ten named saves, or an explicitly confirmed
+replacement of a selected save. Each archive atomically contains its name,
+timestamp and checkpoint; payload CRC32 and SHA256 are checked. The previous
+working checkpoint is retained before requesting another native save. The
+app exits only after the matching native acknowledgement and successful
+archival. **Jugar / Continuar** lists the saves with map, difficulty and date.
+Selecting one preserves the working checkpoint before activating its copy.
+Incompatible or damaged entries remain visible and cannot be continued.
 
 ## Compatibility and storage
 

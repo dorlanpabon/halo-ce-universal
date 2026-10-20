@@ -30,6 +30,18 @@ final class DataPackages {
 
     static boolean isBusy() { return busy.get(); }
 
+    static void playDemo(Activity activity, Runnable ready, Consumer<AlertDialog> open) {
+        File root = activity.getExternalFilesDir(null);
+        if (root == null || busy.get()) {
+            message(activity, open, root == null ? "El almacenamiento no está disponible."
+                : "Ya hay una descarga de datos en curso.");
+        } else if (GameDataPackage.demoAvailable(root)) {
+            ready.run();
+        } else if (busy.compareAndSet(false, true)) {
+            download(activity, root, DemoPackage.URL, ready, open, true);
+        }
+    }
+
     static void show(Activity activity, Runnable ready, Consumer<AlertDialog> open) {
         File root = activity.getExternalFilesDir(null);
         if (root == null || new File(root, "maps/ui.map").isFile() || busy.get()) {
@@ -60,7 +72,7 @@ final class DataPackages {
                 return;
             }
             if (busy.compareAndSet(false, true)) {
-                download(activity, root, url, ready, open);
+                download(activity, root, url, ready, open, false);
                 dialog.dismiss();
             }
         });
@@ -78,18 +90,19 @@ final class DataPackages {
     }
 
     private static void download(Activity activity, File root, String url, Runnable ready,
-            Consumer<AlertDialog> open) {
+            Consumer<AlertDialog> open, boolean demo) {
         AtomicBoolean canceled = new AtomicBoolean();
         LinearLayout content = column(activity);
         TextView status = new TextView(activity);
-        status.setText("Resolviendo enlace… Mantén la aplicación abierta.");
+        status.setText(demo ? "Descargando demo OXM desde Digiex · 379 MB. Mantén la aplicación abierta."
+            : "Resolviendo enlace… Mantén la aplicación abierta.");
         ProgressBar bar = new ProgressBar(activity, null, android.R.attr.progressBarStyleHorizontal);
         bar.setMax(1000);
         bar.setIndeterminate(true);
         content.addView(status);
         content.addView(bar);
         AlertDialog progress = new AlertDialog.Builder(activity)
-            .setTitle("Descargando datos de Halo").setView(content)
+            .setTitle(demo ? "Descargando demo de Halo" : "Descargando datos de Halo").setView(content)
             .setNegativeButton("Cancelar", (d, w) -> canceled.set(true)).create();
         progress.setCanceledOnTouchOutside(false);
         progress.setOnCancelListener(d -> canceled.set(true));
@@ -106,14 +119,24 @@ final class DataPackages {
                     canceled.set(true);
                 if (canceled.get())
                     throw new InterruptedIOException("Descarga cancelada.");
-                ControlsDownload.transfer(source, archive, MAX_DOWNLOAD, canceled, (done, total) ->
+                ControlsDownload.transfer(source, archive, demo ? DemoPackage.SIZE : MAX_DOWNLOAD, canceled, (done, total) ->
                     report(activity, progress, canceled, status, bar, "Descargando", done, total, lastReport));
                 downloaded = true;
-                String map = GameDataPackage.install(archive, root, canceled, (file, done, total) ->
-                    report(activity, progress, canceled, status, bar, "Instalando " + file, done, total, lastReport));
+                GameDataPackage.Progress installation = (file, done, total) ->
+                    report(activity, progress, canceled, status, bar, "Instalando " + file, done, total, lastReport);
+                String map;
+                if (demo) {
+                    lastReport[0] = 0;
+                    report(activity, progress, canceled, status, bar, "Verificando demo", 0, DemoPackage.SIZE, lastReport);
+                    DemoPackage.verify(archive, canceled);
+                    GameDataPackage.installDemo(archive, root, canceled, installation);
+                    map = "demob30";
+                } else {
+                    map = GameDataPackage.install(archive, root, canceled, installation);
+                }
                 installed = true;
                 // The demo's UI cannot select its campaign. An existing player's startup script is never replaced.
-                if ("demob30".equals(map)) {
+                if (!demo && "demob30".equals(map)) {
                     File init = new File(root, "init.txt");
                     if (init.createNewFile()) {
                         try (FileOutputStream out = new FileOutputStream(init)) {
@@ -134,6 +157,12 @@ final class DataPackages {
                 if (activity.isFinishing() || activity.isDestroyed())
                     return;
                 if (success) {
+                    if (demo) {
+                        progress.dismiss();
+                        if (!canceled.get())
+                            ready.run();
+                        return;
+                    }
                     AlertDialog complete = new AlertDialog.Builder(activity)
                         .setTitle("Datos instalados").setMessage(error == null ? "El paquete está listo para jugar."
                             : "Los mapas están instalados, pero no se pudo preparar el inicio de la demo.\n" + error)

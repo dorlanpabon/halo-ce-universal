@@ -10,6 +10,7 @@ import java.io.RandomAccessFile;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.file.Files;
+import java.nio.file.LinkOption;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Enumeration;
@@ -75,6 +76,74 @@ final class GameDataPackage {
         } finally {
             deleteStage(stage);
         }
+    }
+
+    static boolean demoAvailable(File dataRoot) {
+        try {
+            File maps = new File(dataRoot.getCanonicalFile(), "maps");
+            requirePlainMaps(maps);
+            for (String name : new String[] { "ui.map", "demob30.map" }) {
+                File map = new File(maps, name);
+                if (!Files.isRegularFile(map.toPath(), LinkOption.NOFOLLOW_LINKS))
+                    return false;
+                validateHeader(map);
+            }
+            return true;
+        } catch (IOException error) {
+            return false;
+        }
+    }
+
+    /** Adds only missing demo maps; retail maps, settings and saves are never replaced. */
+    static synchronized void installDemo(File archive, File dataRoot, AtomicBoolean canceled, Progress progress)
+            throws IOException {
+        checkCanceled(canceled);
+        File root = dataRoot.getCanonicalFile();
+        if (!root.isDirectory())
+            throw new IOException("No se encuentra la carpeta del juego.");
+        File target = new File(root, "maps");
+        requirePlainMaps(target);
+        File stage = Files.createTempDirectory(root.toPath(), ".halo-data-").toFile();
+        List<File> published = new ArrayList<>();
+        try {
+            extractZip(archive, stage, canceled, progress);
+            File maps = new File(stage, "maps");
+            validateMaps(maps, canceled);
+            if (!new File(maps, "demob30.map").isFile())
+                throw new IOException("El paquete no contiene la demo de Xbox.");
+            requirePlainMaps(target);
+            if (!target.isDirectory() && !target.mkdir())
+                throw new IOException("No se pudo crear la carpeta de mapas.");
+            for (String name : new String[] { "demob30.map", "loading.tga", "ui.map" }) {
+                checkCanceled(canceled);
+                File source = new File(maps, name);
+                if (!source.isFile())
+                    continue;
+                File destination = new File(target, name);
+                if (Files.exists(destination.toPath(), LinkOption.NOFOLLOW_LINKS)) {
+                    if (!Files.isRegularFile(destination.toPath(), LinkOption.NOFOLLOW_LINKS))
+                        throw new IOException("Hay un archivo de demo no válido. Se conservó sin reemplazarlo.");
+                    if (name.endsWith(".map"))
+                        validateHeader(destination);
+                    continue;
+                }
+                Files.move(source.toPath(), destination.toPath());
+                published.add(destination);
+            }
+            checkCanceled(canceled);
+        } catch (IOException | RuntimeException error) {
+            for (File file : published)
+                Files.deleteIfExists(file.toPath());
+            throw error;
+        } finally {
+            deleteStage(stage);
+        }
+    }
+
+    private static void requirePlainMaps(File target) throws IOException {
+        if (Files.isSymbolicLink(target.toPath()) || !target.getCanonicalFile().equals(target.getAbsoluteFile())
+                || target.exists() && !target.isDirectory())
+            throw new IOException("La carpeta de mapas no es válida.");
     }
 
     private static void requireEmpty(File target) throws IOException {
