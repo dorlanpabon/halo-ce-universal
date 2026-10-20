@@ -69,7 +69,6 @@ final class LauncherScreen extends FrameLayout {
         actions.setOrientation(LinearLayout.VERTICAL);
         body.addView(actions);
         play = button("Jugar / Continuar", haveData ? 0 : 1, 16, onPlay);
-        play.setEnabled(haveData);
         actions.addView(play, new LinearLayout.LayoutParams(-1, -2));
         demo = button(haveDemo ? "Jugar demo" : "Descargar y jugar demo", haveData ? 1 : 0, 16, onDemo);
         LinearLayout.LayoutParams demoLayout = new LinearLayout.LayoutParams(-1, -2);
