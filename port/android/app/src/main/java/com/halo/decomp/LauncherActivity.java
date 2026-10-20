@@ -55,6 +55,8 @@ public class LauncherActivity extends Activity {
     private Thread checkpointWorker;
     private boolean demoRequested;
     private String demoBootId;
+    private boolean gameMenuRequested;
+    private String gameMenuBootId;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -139,7 +141,13 @@ public class LauncherActivity extends Activity {
         if (gameStarted || checkpointChoiceStarted || isFinishing() || isDestroyed())
             return;
         if (hasRunningGame()) {
-            launchGame(null);
+            if (gameMenuRequested) {
+                gameMenuRequested = false;
+                driverStarted = false;
+                gameMenuBlocked();
+            } else {
+                launchGame(null);
+            }
             return;
         }
         checkpointChoiceStarted = true;
@@ -151,12 +159,18 @@ public class LauncherActivity extends Activity {
                 CheckpointStore store = checkpointStore();
                 // A request abandoned before the engine started must not be replayed on a later launch.
                 store.clearAbandonedRequests();
-                if (demoRequested) {
+                if (demoRequested || gameMenuRequested) {
                     String id = CheckpointStore.newId();
                     store.writeBoot(id, false);
-                    demo.prepare(id);
+                    if (gameMenuRequested)
+                        demo.prepareMenu(id);
+                    else
+                        demo.prepare(id);
                     handler.post(() -> {
-                        demoBootId = id;
+                        if (gameMenuRequested)
+                            gameMenuBootId = id;
+                        else
+                            demoBootId = id;
                         launchGame(null);
                     });
                     return;
@@ -182,7 +196,7 @@ public class LauncherActivity extends Activity {
                         showCheckpointChoice(candidate);
                 });
             } catch (java.io.IOException e) {
-                if (demoRequested) {
+                if (demoRequested || gameMenuRequested) {
                     try {
                         checkpointStore().clearBoot();
                         new DemoLaunch(dataRoot, getFilesDir()).recover();
@@ -191,12 +205,15 @@ public class LauncherActivity extends Activity {
                 handler.post(() -> {
                     if (isFinishing() || isDestroyed())
                         return;
-                    if (demoRequested) {
+                    if (demoRequested || gameMenuRequested) {
+                        boolean menu = gameMenuRequested;
                         checkpointChoiceStarted = false;
                         driverStarted = false;
                         demoRequested = false;
-                        new AlertDialog.Builder(this).setTitle("Demo no disponible")
-                            .setMessage("No se pudo preparar la demo. Comprueba que sus datos estén instalados.")
+                        gameMenuRequested = false;
+                        new AlertDialog.Builder(this).setTitle(menu ? "Menú no disponible" : "Demo no disponible")
+                            .setMessage(menu ? "No se pudo preparar el menú de Halo. Se conservaron tus datos."
+                                : "No se pudo preparar la demo. Comprueba que sus datos estén instalados.")
                             .setPositiveButton("Aceptar", null).show();
                     } else {
                         checkpointLaunchError(null);
@@ -221,9 +238,29 @@ public class LauncherActivity extends Activity {
         DataPackages.playDemo(this, () -> {
             if (isFinishing() || isDestroyed())
                 return;
+            gameMenuRequested = false;
             demoRequested = true;
             startGameAfterDriver();
         }, dialog -> dialog.show());
+    }
+
+    void startGameMenu() {
+        if (gameStarted || checkpointChoiceStarted || driverStarted || isFinishing() || isDestroyed()
+                || DataPackages.isBusy() || !haveData())
+            return;
+        if (hasRunningGame()) {
+            gameMenuBlocked();
+            return;
+        }
+        demoRequested = false;
+        gameMenuRequested = true;
+        startGameAfterDriver();
+    }
+
+    private void gameMenuBlocked() {
+        new AlertDialog.Builder(this).setTitle("Hay una partida abierta")
+            .setMessage("Guarda y sal de la partida antes de abrir la configuración interna de Halo.")
+            .setPositiveButton("Aceptar", null).show();
     }
 
     private boolean haveDemo() {
@@ -374,6 +411,8 @@ public class LauncherActivity extends Activity {
             game.putExtra(HaloActivity.CHECKPOINT_BOOT_ID, bootId);
         if (demoBootId != null)
             game.putExtra(HaloActivity.DEMO_BOOT_ID, demoBootId);
+        if (gameMenuBootId != null)
+            game.putExtra(HaloActivity.GAME_MENU_BOOT_ID, gameMenuBootId);
         startActivity(game);
         finish();
     }
@@ -491,6 +530,7 @@ public class LauncherActivity extends Activity {
             if (!DataPackages.isBusy())
                 DataPackages.show(this, this::buildInterface, dialog -> dialog.show());
         }, () -> ControlsUpdater.show(this, dialog -> dialog.show()));
+        screen.addGameMenuAction(haveData(), this::startGameMenu);
         pick = screen.pick;
         progress = screen.progress;
         status = screen.status;

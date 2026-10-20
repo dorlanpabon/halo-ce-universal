@@ -111,7 +111,7 @@ public class GameMenuStyleHostTest {
         AlertDialog dialog = ShadowAlertDialog.getLatestAlertDialog();
         String[] expected = {"Controles predefinidos", "Perfiles gráficos", "Pantalla y resolución", "General",
             "HUD personalizado", "Sensibilidad al mirar", "Exportar HUD", "Importar HUD",
-            "Descargar paquete de datos", "Actualizar APK"};
+            "Descargar paquete de datos", "Actualizar APK", "Configuración interna de Halo"};
         assertEquals(expected.length, dialog.getListView().getAdapter().getCount());
         for (int index = 0; index < expected.length; index++)
             assertEquals(expected[index], dialog.getListView().getAdapter().getItem(index));

@@ -11,6 +11,7 @@ import android.widget.Button;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.SeekBar;
+import android.widget.Switch;
 import android.widget.TextView;
 
 import java.util.Locale;
@@ -27,6 +28,7 @@ final class LookSensitivityPanel extends LinearLayout {
     private final float[] horizontalValues = {1f, TouchLayout.DEFAULT_HORIZONTAL_SENSITIVITY, 4f};
     private final Button[] presets = new Button[3];
     private final float[] presetValues = {0.75f, 1f, 2f};
+    private final Switch invertHorizontal, invertVertical;
     private float sensitivity;
     private float horizontalSensitivity = 1f;
 
@@ -93,9 +95,15 @@ final class LookSensitivityPanel extends LinearLayout {
         TextView help = label(12);
         help.setText("Ágil: menos deslizamientos para girar. Prueba a la derecha.");
         controls.addView(help);
+        invertHorizontal = inversionSwitch("Invertir deslizamiento horizontal");
+        invertVertical = inversionSwitch("Invertir deslizamiento vertical");
+        controls.addView(invertHorizontal, new LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT));
+        controls.addView(invertVertical, new LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT));
 
         preview = new CameraPreview(context, logicalUnitsPerPixel);
         addView(preview, new LayoutParams(0, dp(252), 1f));
+        invertHorizontal.setOnCheckedChangeListener((button, checked) -> preview.invalidate());
+        invertVertical.setOnCheckedChangeListener((button, checked) -> preview.invalidate());
         slider.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
             @Override public void onProgressChanged(SeekBar bar, int progress, boolean user) {
                 setValue(TouchLayout.MIN_SENSITIVITY + progress * STEP);
@@ -113,6 +121,16 @@ final class LookSensitivityPanel extends LinearLayout {
 
     float horizontalValue() {
         return horizontalSensitivity;
+    }
+
+    boolean invertedHorizontal() { return invertHorizontal.isChecked(); }
+
+    boolean invertedVertical() { return invertVertical.isChecked(); }
+
+    void setInvertedAxes(boolean x, boolean y) {
+        invertHorizontal.setChecked(x);
+        invertVertical.setChecked(y);
+        preview.invalidate();
     }
 
     void setHorizontalValue(float value) {
@@ -144,6 +162,21 @@ final class LookSensitivityPanel extends LinearLayout {
         label.setTextColor(0xffeeeeee);
         label.setTextSize(size);
         return label;
+    }
+
+    private Switch inversionSwitch(String text) {
+        Switch toggle = new Switch(getContext());
+        toggle.setText(text);
+        toggle.setTextColor(0xffeeeeee);
+        toggle.setTextSize(13);
+        toggle.setSingleLine(false);
+        toggle.setMinimumHeight(dp(48));
+        toggle.setSwitchPadding(dp(8));
+        toggle.setThumbTintList(new ColorStateList(new int[][] {{android.R.attr.state_checked}, {}},
+            new int[] {ACCENT, 0xffa4b9c8}));
+        toggle.setTrackTintList(new ColorStateList(new int[][] {{android.R.attr.state_checked}, {}},
+            new int[] {0xff416d80, 0xff405365}));
+        return toggle;
     }
 
     private Button button(String text) {
@@ -250,6 +283,8 @@ final class LookSensitivityPanel extends LinearLayout {
             float dx = (x - lastX) * unitsPerPixel * value() * horizontalValue()
                 * TouchControls.LOOK_RADIANS_PER_UNIT;
             float dy = (y - lastY) * unitsPerPixel * value() * TouchControls.LOOK_RADIANS_PER_UNIT;
+            if (invertedHorizontal()) dx = -dx;
+            if (invertedVertical()) dy = -dy;
             if (Float.isFinite(dx) && Float.isFinite(dy)) {
                 yaw = (float) Math.IEEEremainder(yaw + dx, Math.PI * 2);
                 pitch = Math.max(-(float) Math.PI / 2, Math.min((float) Math.PI / 2, pitch + dy));

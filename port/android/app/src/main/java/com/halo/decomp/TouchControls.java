@@ -99,6 +99,8 @@ public final class TouchControls extends View implements SensorEventListener, In
     private static final String KEY_CONFIGURATION = "configuration";
     private static final String KEY_HIDDEN = "hidden";
     private static final String KEY_AUTO_WALK = "auto-walk";
+    private static final String KEY_INVERT_SWIPE_X = "invert-swipe-x";
+    private static final String KEY_INVERT_SWIPE_Y = "invert-swipe-y";
     private static final String KEY_JUMP_MELEE_SWAPPED = "jump-melee-swapped-v1";
 
     /**
@@ -181,6 +183,9 @@ public final class TouchControls extends View implements SensorEventListener, In
     private TouchLayout layout = new TouchLayout();
     private float sensitivity = 1f;
     private float horizontalSensitivity = TouchLayout.DEFAULT_HORIZONTAL_SENSITIVITY;
+    private boolean invertSwipeX, invertSwipeY;
+    private boolean gameMenuPending;
+    private final Runnable releaseMenuButton = () -> nativeState(0, 0, 0, 0, 0, 0, 0);
     /** the controls removed by the toolbar's Hide, until its Touch */
     private boolean hidden;
     private boolean editing;
@@ -252,6 +257,7 @@ public final class TouchControls extends View implements SensorEventListener, In
             if (!deviceInputActive)
                 return;
             scene = nativeScene();
+            tryOpenGameMenu();
             int mode = nativeGyroMode();
             if (mode != gyroMode) {
                 gyroMode = mode;
@@ -279,6 +285,8 @@ public final class TouchControls extends View implements SensorEventListener, In
         preferences = context.getSharedPreferences(PREFERENCES, Context.MODE_PRIVATE);
         migrateJumpMeleeLayout(context);
         autoWalkEnabled = preferences.getBoolean(KEY_AUTO_WALK, true);
+        invertSwipeX = preferences.getBoolean(KEY_INVERT_SWIPE_X, false);
+        invertSwipeY = preferences.getBoolean(KEY_INVERT_SWIPE_Y, false);
         activeHud = Math.max(0, Math.min(2, preferences.getInt("hud-slot", 0)));
         loadLayout(context);
         hidden = preferences.getBoolean(KEY_HIDDEN, false);
@@ -370,6 +378,7 @@ public final class TouchControls extends View implements SensorEventListener, In
     }
 
     public void stopDeviceInput() {
+        gameMenuPending = false;
         deviceInputActive = false;
         removeCallbacks(poll);
         if (inputManager != null)
@@ -523,6 +532,7 @@ public final class TouchControls extends View implements SensorEventListener, In
 
     /** lets go of every finger and sends a released controller */
     public void reset() {
+        releaseHandler.removeCallbacks(releaseMenuButton);
         cancelGrenadePulse();
         cancelAutoWalk();
         dragPointer = -1;
@@ -648,6 +658,26 @@ public final class TouchControls extends View implements SensorEventListener, In
     }
 
     // ---------- fingers
+
+    private void pulseMenuButton(int bit) {
+        reset();
+        nativeState(0, 0, 0, 0, 0, 0, 1 << bit);
+        releaseHandler.postDelayed(releaseMenuButton, GRENADE_PULSE_MS);
+    }
+
+    void openGameMenu() {
+        gameMenuPending = true;
+        post(this::tryOpenGameMenu);
+    }
+
+    private void tryOpenGameMenu() {
+        if (!gameMenuPending || editing || openDialogs > 0 || !deviceInputActive
+                || (scene & SCENE_KNOWN) == 0)
+            return;
+        gameMenuPending = false;
+        if ((scene & SCENE_MENUS) == 0)
+            pulseMenuButton(6); // SDL Start, independent of the profile's gameplay binding.
+    }
 
     private static boolean inside(float x, float y, float cx, float cy, float radius) {
         return (x - cx) * (x - cx) + (y - cy) * (y - cy) <= radius * radius;
@@ -848,6 +878,8 @@ public final class TouchControls extends View implements SensorEventListener, In
         if (id == lookPointer) {
             float dx = logical(px - lookX) * sensitivity * horizontalSensitivity;
             float dy = logical(py - lookY) * sensitivity;
+            if (invertSwipeX) dx = -dx;
+            if (invertSwipeY) dy = -dy;
             if (dx != 0 || dy != 0)
                 nativeLook(dx, dy);
             lookX = px;
@@ -982,7 +1014,8 @@ public final class TouchControls extends View implements SensorEventListener, In
     private boolean saveLayout() {
         String configuration = exportLayout();
         boolean saved = preferences.edit().putString(KEY_CONFIGURATION, configuration)
-            .putString("hud-layout-" + activeHud, configuration).commit();
+            .putString("hud-layout-" + activeHud, configuration)
+            .putBoolean(KEY_INVERT_SWIPE_X, invertSwipeX).putBoolean(KEY_INVERT_SWIPE_Y, invertSwipeY).commit();
         if (!saved)
             Toast.makeText(getContext(), "The touch layout could not be saved. Try again.", Toast.LENGTH_LONG).show();
         return saved;
@@ -1034,12 +1067,13 @@ public final class TouchControls extends View implements SensorEventListener, In
     void showOptions() {
         String[] items = {"Controles predefinidos", "Perfiles gráficos", "Pantalla y resolución", "General",
             "HUD personalizado", "Sensibilidad al mirar", "Exportar HUD", "Importar HUD",
-            "Descargar paquete de datos", "Actualizar APK"};
+            "Descargar paquete de datos", "Actualizar APK", "Configuración interna de Halo"};
         String[] details = {"Dos pulgares, tres dedos u original", "Rendimiento y calidad de imagen",
             "Formato de pantalla y nitidez", "Vibración, movimiento y botones",
             "Tamaño, opacidad y visibilidad", "Velocidad y precisión de cámara",
             "Guardar tu distribución en un archivo", "Cargar una distribución guardada",
-            "Instalar datos desde un enlace", "Comprobar si hay una versión nueva"};
+            "Instalar datos desde un enlace", "Comprobar si hay una versión nueva",
+            "Menú del juego: Settings, perfil y cámara"};
         AlertDialog dialog = GameMenuStyle.builder(getContext())
             .setTitle("Halo · Controles")
             .setAdapter(new SettingsMenuAdapter(getContext(), items, details), (d, which) -> {
@@ -1063,6 +1097,8 @@ public final class TouchControls extends View implements SensorEventListener, In
                     post(() -> DataPackages.show((HaloActivity) getContext(), () -> {}, this::openDialog));
                 } else if (which == 9) {
                     post(() -> ControlsUpdater.show((HaloActivity) getContext(), this::openDialog));
+                } else if (which == 10) {
+                    ((HaloActivity) getContext()).openOriginalGameMenu();
                 }
             })
             .setNegativeButton("Cerrar", null)
@@ -1469,6 +1505,7 @@ public final class TouchControls extends View implements SensorEventListener, In
 
     private void showSensitivity() {
         LookSensitivityPanel panel = new LookSensitivityPanel(getContext(), sensitivity, horizontalSensitivity, logical(1));
+        panel.setInvertedAxes(invertSwipeX, invertSwipeY);
         AlertDialog dialog = GameMenuStyle.builder(getContext())
             .setTitle("Sensibilidad al mirar")
             .setView(panel)
@@ -1480,15 +1517,21 @@ public final class TouchControls extends View implements SensorEventListener, In
             dialog.getButton(AlertDialog.BUTTON_NEUTRAL).setOnClickListener(view -> {
                 panel.setValue(1f);
                 panel.setHorizontalValue(TouchLayout.DEFAULT_HORIZONTAL_SENSITIVITY);
+                panel.setInvertedAxes(false, false);
             });
             dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(view -> {
                 float previous = sensitivity;
                 float previousHorizontal = horizontalSensitivity;
+                boolean previousX = invertSwipeX, previousY = invertSwipeY;
                 sensitivity = panel.value();
                 horizontalSensitivity = panel.horizontalValue();
-                if (saveLayout())
+                invertSwipeX = panel.invertedHorizontal();
+                invertSwipeY = panel.invertedVertical();
+                if (saveLayout()) {
                     dialog.dismiss();
-                else {
+                } else {
+                    invertSwipeX = previousX;
+                    invertSwipeY = previousY;
                     sensitivity = previous;
                     horizontalSensitivity = previousHorizontal;
                 }
@@ -1668,9 +1711,10 @@ public final class TouchControls extends View implements SensorEventListener, In
                 float opacity = editing && !layout.shown(i) ? 0.15f : layout.opacity(i);
                 circle(canvas, layout.x(i), layout.y(i), layout.radius(i), action < 0 ? label(type) : "",
                     held(i) || dragControl == i, Math.min(textSize, 16), opacity);
-                if (action == 2 || action == 3)
+                if (action == 0 || action == 2 || action == 3 || action == 4)
                     icons.drawCaption(canvas, paint, layout.x(i), layout.y(i), layout.radius(i),
-                        KINDS[type].buttonName, action == 2 ? "USAR" : "ARMA");
+                        KINDS[type].buttonName, action == 0 ? "SALTO" : action == 4 ? "GOLPE"
+                            : action == 2 ? "USAR" : "ARMA");
                 else if (action >= 0) {
                     icons.draw(canvas, paint, layout.x(i), layout.y(i), layout.radius(i), action);
                     icons.drawLabel(canvas, paint, layout.x(i), layout.y(i), layout.radius(i), action);

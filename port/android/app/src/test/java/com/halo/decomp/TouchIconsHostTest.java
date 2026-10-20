@@ -34,20 +34,21 @@ public class TouchIconsHostTest {
         assertEquals("Drawing restores the canvas for the next control", 1, canvas.getSaveCount());
     }
 
-    @Test public void contextPromptsKeepXboxLettersAndDistinctActions() {
+    @Test public void facePromptsKeepXboxLettersAndDistinctActions() {
         Canvas canvas = canvas();
         TouchIcons icons = icons();
         Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
-        icons.drawCaption(canvas, paint, 40, 40, 24, "X", "USAR");
-        icons.drawCaption(canvas, paint, 100, 40, 24, "Y", "ARMA");
+        String[] buttons = {"A", "B", "X", "Y"};
+        String[] actions = {"SALTO", "GOLPE", "USAR", "ARMA"};
+        for (int i = 0; i < buttons.length; i++)
+            icons.drawCaption(canvas, paint, 40, 40, 24, buttons[i], actions[i]);
         ShadowCanvas drawn = shadowOf(canvas);
-        assertEquals(4, drawn.getTextHistoryCount());
-        assertEquals("X", drawn.getDrawnTextEvent(0).text);
-        assertEquals("USAR", drawn.getDrawnTextEvent(1).text);
-        assertEquals("Y", drawn.getDrawnTextEvent(2).text);
-        assertEquals("ARMA", drawn.getDrawnTextEvent(3).text);
-        assertTrue(drawn.getDrawnTextEvent(0).x < drawn.getDrawnTextEvent(1).x);
-        assertTrue(drawn.getDrawnTextEvent(2).x < drawn.getDrawnTextEvent(3).x);
+        assertEquals(8, drawn.getTextHistoryCount());
+        for (int i = 0; i < buttons.length; i++) {
+            assertEquals(buttons[i], drawn.getDrawnTextEvent(i * 2).text);
+            assertEquals(actions[i], drawn.getDrawnTextEvent(i * 2 + 1).text);
+            assertTrue(drawn.getDrawnTextEvent(i * 2).x < drawn.getDrawnTextEvent(i * 2 + 1).x);
+        }
     }
 
     @Test public void contextCaptionsStaySmallAndInsideTheirButton() {
@@ -55,8 +56,10 @@ public class TouchIconsHostTest {
         for (float radius : new float[]{18, 30, 46}) {
             Canvas canvas = canvas();
             Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
-            icons.drawCaption(canvas, paint, 80, 80, radius, "X", "USAR");
-            icons.drawCaption(canvas, paint, 80, 80, radius, "White", "ARMA");
+            for (String action : new String[]{"SALTO", "GOLPE", "USAR", "ARMA"}) {
+                icons.drawCaption(canvas, paint, 80, 80, radius, "X", action);
+                icons.drawCaption(canvas, paint, 80, 80, radius, "White", action);
+            }
             ShadowCanvas drawn = shadowOf(canvas);
             for (int i = 0; i < drawn.getTextHistoryCount(); i++) {
                 ShadowCanvas.TextHistoryEvent text = drawn.getDrawnTextEvent(i);
