@@ -17,7 +17,6 @@ import android.view.View;
 import android.widget.Button;
 import android.widget.LinearLayout;
 import android.widget.ProgressBar;
-import android.widget.ScrollView;
 import android.widget.TextView;
 
 import java.io.File;
@@ -244,11 +243,8 @@ public class LauncherActivity extends Activity {
     }
 
     void showSavedGames(java.util.List<CheckpointSlots.Entry> saves) {
-        String[] labels = new String[saves.size()];
-        for (int i = 0; i < labels.length; i++)
-            labels[i] = SaveLabels.label(saves.get(i));
         AlertDialog dialog = new AlertDialog.Builder(this).setTitle("Partidas guardadas")
-            .setItems(labels, (d, which) -> {
+            .setAdapter(new LauncherSaveAdapter(this, saves), (d, which) -> {
                 CheckpointSlots.Entry entry = saves.get(which);
                 if (entry.candidate.kind == CheckpointStore.Kind.READY) {
                     prepareCheckpointBoot(entry.candidate, true, entry.id);
@@ -263,6 +259,7 @@ public class LauncherActivity extends Activity {
             .setNegativeButton("Volver", (d, which) -> resetLaunchChoice()).create();
         dialog.setOnCancelListener(d -> resetLaunchChoice());
         dialog.show();
+        LauncherDialogs.style(dialog);
     }
 
     private void resetLaunchChoice() {
@@ -480,102 +477,25 @@ public class LauncherActivity extends Activity {
     }
 
     private void buildInterface() {
-        LinearLayout layout = new LinearLayout(this);
-        layout.setOrientation(LinearLayout.VERTICAL);
-        layout.setGravity(Gravity.CENTER);
-        layout.setPadding(dp(48), dp(24), dp(48), dp(24));
-        layout.setBackgroundColor(Color.rgb(12, 16, 20));
-
-        TextView title = new TextView(this);
-        title.setText(haveData() ? "Halo: Combat Evolved" : "Halo necesita sus datos de juego");
-        title.setTextColor(Color.WHITE);
-        title.setTextSize(TypedValue.COMPLEX_UNIT_SP, 24);
-        title.setGravity(Gravity.CENTER);
-        layout.addView(title);
-
-        TextView message = new TextView(this);
-        message.setText(haveData()
-            ? "Jugar / Continuar permite elegir una de tus partidas guardadas. Jugar demo inicia la misión de demostración desde el principio.\n\n"
-                + "Puedes conservar hasta 10 partidas con nombre desde Guardar y salir."
-            : "Choose an Xbox disc image of Halo: Combat Evolved (an .iso or .xiso file, any "
-            + "version) on this device. Its maps folder is copied into the app's storage (about 1.8 GB), "
-            + "and you can delete the image afterwards.\n\n"
-            + "You can also copy a maps folder from a computer:\n"
-            + "adb push <folder with maps>/. " + (dataRoot != null ? dataRoot.getAbsolutePath() : "") + "/");
-        message.setTextColor(Color.rgb(200, 205, 210));
-        message.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15);
-        message.setGravity(Gravity.CENTER);
-        message.setPadding(0, dp(16), 0, dp(16));
-        layout.addView(message);
-
-        Button play = new Button(this);
-        play.setText("Jugar / Continuar");
-        play.setEnabled(haveData());
-        play.setOnClickListener(v -> {
+        LauncherScreen screen = new LauncherScreen(this, haveData(), haveDemo(), () -> {
             if (!DataPackages.isBusy())
                 startGameAfterDriver();
-        });
-        layout.addView(play);
-
-        Button demo = new Button(this);
-        demo.setText(haveDemo() ? "Jugar demo" : "Descargar y jugar demo");
-        demo.setOnClickListener(v -> startDemo());
-        layout.addView(demo);
-        if (!haveDemo()) {
-            TextView demoHelp = new TextView(this);
-            demoHelp.setText("Descarga la demo promocional directamente en este teléfono (aprox. 380 MB). Necesitas conexión y espacio para instalarla.");
-            demoHelp.setTextColor(Color.LTGRAY);
-            demoHelp.setGravity(Gravity.CENTER);
-            layout.addView(demoHelp);
-        }
-
-        pick = new Button(this);
-        pick.setText("Elegir imagen de disco");
-        pick.setEnabled(!haveData());
-        pick.setOnClickListener(v -> {
+        }, this::startDemo, () -> {
             if (DataPackages.isBusy())
                 return;
-            // (disc images have no MIME type of their own: any file, checked
-            // when it is read)
             Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
             intent.addCategory(Intent.CATEGORY_OPENABLE);
             intent.setType("*/*");
             startActivityForResult(intent, PICK_IMAGE);
-        });
-        layout.addView(pick, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT,
-            LinearLayout.LayoutParams.WRAP_CONTENT));
-
-        Button download = new Button(this);
-        download.setText("Descargar paquete de datos");
-        download.setOnClickListener(v -> {
+        }, () -> {
             if (!DataPackages.isBusy())
                 DataPackages.show(this, this::buildInterface, dialog -> dialog.show());
-        });
-        layout.addView(download);
-        Button update = new Button(this);
-        update.setText("Buscar actualización de la APK");
-        update.setOnClickListener(v -> ControlsUpdater.show(this, dialog -> dialog.show()));
-        layout.addView(update);
-
-        progress = new ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal);
-        progress.setMax(1000);
-        progress.setVisibility(View.GONE);
-        LinearLayout.LayoutParams progressLayout = new LinearLayout.LayoutParams(dp(480),
-            LinearLayout.LayoutParams.WRAP_CONTENT);
-        progressLayout.topMargin = dp(16);
-        layout.addView(progress, progressLayout);
-
-        status = new TextView(this);
-        status.setTextColor(Color.rgb(160, 200, 160));
-        status.setGravity(Gravity.CENTER);
-        status.setPadding(0, dp(8), 0, 0);
-        layout.addView(status);
-
-        ScrollView scroll = new ScrollView(this);
-        scroll.setFillViewport(true);
-        scroll.addView(layout);
-        setContentView(scroll);
-        pick.requestFocus();
+        }, () -> ControlsUpdater.show(this, dialog -> dialog.show()));
+        pick = screen.pick;
+        progress = screen.progress;
+        status = screen.status;
+        setContentView(screen);
+        (screen.play.isEnabled() ? screen.play : screen.demo).requestFocus();
     }
 
     @Override
