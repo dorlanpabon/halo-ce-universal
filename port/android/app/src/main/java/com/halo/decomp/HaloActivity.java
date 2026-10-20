@@ -113,6 +113,7 @@ public class HaloActivity extends SDLActivity {
         save.setOnClickListener(v -> startCheckpointSave());
         GameMenuStyle.content(save);
         LinearLayout actions = new LinearLayout(this);
+        actions.setOrientation(LinearLayout.VERTICAL);
         int padding = Math.round(24 * getResources().getDisplayMetrics().density);
         actions.setPadding(padding, 0, padding, padding / 3);
         actions.addView(save, new LinearLayout.LayoutParams(-1, -2));
@@ -127,11 +128,16 @@ public class HaloActivity extends SDLActivity {
         GameMenuStyle.content(exit);
         actions.addView(exit, new LinearLayout.LayoutParams(-1, -2));
         ScrollView scroll = new ScrollView(this);
-        scroll.addView(actions);
+        scroll.addView(actions, new ScrollView.LayoutParams(-1, -2));
+        FrameLayout content = new FrameLayout(this);
+        float density = getResources().getDisplayMetrics().density;
+        int height = Math.round(Math.max(48, Math.min(164,
+            getResources().getDisplayMetrics().heightPixels / density - 220)) * density);
+        content.addView(scroll, new FrameLayout.LayoutParams(-1, height));
         AlertDialog dialog = GameMenuStyle.builder(this)
             .setTitle("Pausa")
             .setMessage("Guarda el último punto de control, no la posición exacta al salir.")
-            .setView(scroll)
+            .setView(content)
             .setPositiveButton("Reanudar", null)
             .setNeutralButton("Ajustes de controles", (d, which) -> touchControls.showOptions())
             .setNegativeButton("Atrás", null)
