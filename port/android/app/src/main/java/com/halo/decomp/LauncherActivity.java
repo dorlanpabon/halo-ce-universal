@@ -385,7 +385,7 @@ public class LauncherActivity extends Activity {
         layout.addView(message);
 
         pick = new Button(this);
-        pick.setText("Choose disc image");
+        pick.setText("Elegir imagen de disco");
         pick.setOnClickListener(v -> {
             if (DataPackages.isBusy())
                 return;

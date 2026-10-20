@@ -3,6 +3,8 @@ package com.halo.decomp;
 import android.app.Activity;
 import android.app.AlertDialog;
 import android.app.Application;
+import android.content.Intent;
+import android.os.Looper;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.Button;
@@ -24,6 +26,7 @@ import java.io.File;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import static org.junit.Assert.*;
+import static org.robolectric.Shadows.shadowOf;
 
 @RunWith(RobolectricTestRunner.class)
 @Config(application = Application.class, sdk = {28, 35}, qualifiers = "w800dp-h360dp-land-mdpi")
@@ -94,6 +97,31 @@ public class DataPackagesHostTest {
         data.performClick();
         assertNotNull(find(ShadowAlertDialog.getLatestAlertDialog().getWindow().getDecorView(), EditText.class, null));
         launcher.finish();
+    }
+
+    @Test public void blockedMediaFirePageCanOpenInUserBrowserWithoutDownloadingPayload() {
+        String page = "https://www.mediafire.com/file/example123/package.iso/file";
+        DataPackages.downloadFailure(activity, AlertDialog::show, "HTTP 403", page);
+        AlertDialog dialog = ShadowAlertDialog.getLatestAlertDialog();
+        assertEquals("Abrir MediaFire", dialog.getButton(AlertDialog.BUTTON_POSITIVE).getText().toString());
+        assertTrue(shadowOf(dialog).getMessage().toString().contains("Elegir imagen de disco"));
+        dialog.getButton(AlertDialog.BUTTON_POSITIVE).performClick();
+        shadowOf(Looper.getMainLooper()).idle();
+        Intent browser = shadowOf(activity).getNextStartedActivity();
+        assertNotNull(browser);
+        assertEquals(Intent.ACTION_VIEW, browser.getAction());
+        assertEquals(page, browser.getDataString());
+        assertFalse(new File(activity.getCacheDir(), "game-data.partial").exists());
+    }
+
+    @Test public void archiveErrorsDoNotOpenABrowserOrExposeAnUntrustedDestination() {
+        for (String page : new String[] {null, "https://www.mediafire.com.evil.example/file/key/archive.iso"}) {
+            DataPackages.downloadFailure(activity, AlertDialog::show, "El mapa no es compatible", page);
+            AlertDialog dialog = ShadowAlertDialog.getLatestAlertDialog();
+            assertEquals("Aceptar", dialog.getButton(AlertDialog.BUTTON_POSITIVE).getText().toString());
+            assertNull(shadowOf(activity).getNextStartedActivity());
+            dialog.dismiss();
+        }
     }
 
     private static <T extends View> T find(View view, Class<T> type, String text) {

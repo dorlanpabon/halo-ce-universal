@@ -96,6 +96,14 @@ Xbox ISO/XISO or a ZIP containing one `maps/` folder (Xbox map format 5, at most
 existing maps, saves and configuration are not replaced. No game data or preset
 commercial download URL is included.
 
+Public MediaFire file pages are also accepted. The importer resolves their
+download button over HTTPS, without executing scripts or following ads. Pages
+that require a browser check or do not expose a public file offer **Abrir
+MediaFire** instead. Finish the download in your browser, then return and choose
+the downloaded ISO with **Elegir imagen de disco**. An HTML response is never
+installed as game data; existing Xbox-map validation applies. This does not add
+support for PC game data or compressed 7z/RAR imports.
+
 The separately signed `.controls` edition also has **Actualizar APK** in both
 places. Its channel is `dorlanpabon/halo-ce-universal`, release tags `controles-N`
 with a `halo-controls.apk` asset and version code `10600 + N`. Draft and
