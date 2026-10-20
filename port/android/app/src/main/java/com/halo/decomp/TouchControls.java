@@ -1028,15 +1028,21 @@ public final class TouchControls extends View implements SensorEventListener, In
         openDialogs++;
         reset();
         dialog.show();
+        GameMenuStyle.style(dialog);
     }
 
     void showOptions() {
         String[] items = {"Controles predefinidos", "Perfiles gráficos", "Pantalla y resolución", "General",
             "HUD personalizado", "Sensibilidad al mirar", "Exportar HUD", "Importar HUD",
             "Descargar paquete de datos", "Actualizar APK"};
-        AlertDialog dialog = new AlertDialog.Builder(getContext())
+        String[] details = {"Dos pulgares, tres dedos u original", "Rendimiento y calidad de imagen",
+            "Formato de pantalla y nitidez", "Vibración, movimiento y botones",
+            "Tamaño, opacidad y visibilidad", "Velocidad y precisión de cámara",
+            "Guardar tu distribución en un archivo", "Cargar una distribución guardada",
+            "Instalar datos desde un enlace", "Comprobar si hay una versión nueva"};
+        AlertDialog dialog = GameMenuStyle.builder(getContext())
             .setTitle("Halo · Controles")
-            .setItems(items, (d, which) -> {
+            .setAdapter(new SettingsMenuAdapter(getContext(), items, details), (d, which) -> {
                 if (which == 0) {
                     post(this::showPresets);
                 } else if (which == 1) {
@@ -1184,7 +1190,7 @@ public final class TouchControls extends View implements SensorEventListener, In
             ? new String[] {"Dos pulgares · estilo Free Fire", "Tres dedos · disparo izquierdo", "Original Ports 106"}
             : new String[] {"Dos pulgares · estilo Free Fire", "Tres dedos · disparo izquierdo", "Original Ports 106",
                 "Restaurar diseño anterior"};
-        openDialog(new AlertDialog.Builder(getContext())
+        openDialog(GameMenuStyle.builder(getContext())
             .setTitle("Controles predefinidos")
             .setItems(names, (dialog, which) -> {
                 String next = which == 0 ? TouchPresets.twoThumbs()
@@ -1303,7 +1309,7 @@ public final class TouchControls extends View implements SensorEventListener, In
 
         ScrollView scroll = new ScrollView(getContext());
         scroll.addView(panel);
-        AlertDialog dialog = new AlertDialog.Builder(getContext())
+        AlertDialog dialog = GameMenuStyle.builder(getContext())
             .setTitle("General")
             .setView(scroll)
             .setPositiveButton("Done", null)
@@ -1365,7 +1371,7 @@ public final class TouchControls extends View implements SensorEventListener, In
         }
         ScrollView scroll = new ScrollView(getContext());
         scroll.addView(list);
-        openDialog(new AlertDialog.Builder(getContext())
+        openDialog(GameMenuStyle.builder(getContext())
             .setTitle("Edit buttons size")
             .setView(scroll)
             .setPositiveButton("Done", null)
@@ -1414,7 +1420,7 @@ public final class TouchControls extends View implements SensorEventListener, In
         refresh[0].run();
         ScrollView scroll = new ScrollView(getContext());
         scroll.addView(list);
-        AlertDialog dialog = new AlertDialog.Builder(getContext())
+        AlertDialog dialog = GameMenuStyle.builder(getContext())
             .setTitle("Hide or add buttons")
             .setView(scroll)
             .setPositiveButton("Done", null)
@@ -1427,7 +1433,7 @@ public final class TouchControls extends View implements SensorEventListener, In
     }
 
     private void confirmReset(Runnable refresh) {
-        new AlertDialog.Builder(getContext())
+        GameMenuStyle.builder(getContext())
             .setTitle("Reset the buttons?")
             .setMessage("This puts every button back in its place and size, shows them all and removes the copies.")
             .setNegativeButton("Cancel", null)
@@ -1446,7 +1452,7 @@ public final class TouchControls extends View implements SensorEventListener, In
         String[] names = new String[TouchLayout.BASE_COUNT];
         for (int i = 0; i < names.length; i++)
             names[i] = controlName(i);
-        new AlertDialog.Builder(getContext())
+        GameMenuStyle.builder(getContext())
             .setTitle("Add button")
             .setItems(names, (d, type) -> {
                 reset();
@@ -1463,7 +1469,7 @@ public final class TouchControls extends View implements SensorEventListener, In
 
     private void showSensitivity() {
         LookSensitivityPanel panel = new LookSensitivityPanel(getContext(), sensitivity, horizontalSensitivity, logical(1));
-        AlertDialog dialog = new AlertDialog.Builder(getContext())
+        AlertDialog dialog = GameMenuStyle.builder(getContext())
             .setTitle("Sensibilidad al mirar")
             .setView(panel)
             .setNegativeButton("Cancelar", null)

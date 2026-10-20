@@ -38,9 +38,9 @@ public final class HudEditorPanel extends FrameLayout {
         void onVisibility(boolean visible);
     }
 
-    private static final int YELLOW = 0xffffc400;
-    private static final int PANEL = 0xe610171b;
-    private static final int BORDER = 0xff344047;
+    private static final int YELLOW = 0xff9ee3f4;
+    private static final int PANEL = 0xff101b27;
+    private static final int BORDER = 0xff263848;
 
     private final Listener listener;
     private final ScrollView viewport;

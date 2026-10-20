@@ -109,10 +109,15 @@ public class HaloActivity extends SDLActivity {
         Button save = new Button(this);
         save.setText("Guardar y salir");
         save.setOnClickListener(v -> startCheckpointSave());
-        AlertDialog dialog = new AlertDialog.Builder(this)
+        GameMenuStyle.content(save);
+        LinearLayout actions = new LinearLayout(this);
+        int padding = Math.round(24 * getResources().getDisplayMetrics().density);
+        actions.setPadding(padding, 0, padding, padding / 3);
+        actions.addView(save, new LinearLayout.LayoutParams(-1, -2));
+        AlertDialog dialog = GameMenuStyle.builder(this)
             .setTitle("Pausa")
             .setMessage("Guarda el último punto de control, no la posición exacta al salir.")
-            .setView(save)
+            .setView(actions)
             .setPositiveButton("Reanudar", null)
             .setNeutralButton("Ajustes de controles", (d, which) -> touchControls.showOptions())
             .setNegativeButton("Atrás", null)
@@ -126,6 +131,8 @@ public class HaloActivity extends SDLActivity {
             resumeTouchGameIfReady();
         });
         dialog.show();
+        GameMenuStyle.style(dialog);
+        GameMenuStyle.primary(dialog.getButton(AlertDialog.BUTTON_POSITIVE));
     }
 
     private boolean touchOverlayPaused() {
@@ -179,7 +186,7 @@ public class HaloActivity extends SDLActivity {
     void startCheckpointSave() {
         if (checkpointBusy() || checkpointSaveDialog != null || isFinishing() || isDestroyed())
             return;
-        AlertDialog loading = new AlertDialog.Builder(this).setTitle("Guardar partida")
+        AlertDialog loading = GameMenuStyle.builder(this).setTitle("Guardar partida")
             .setMessage("Leyendo las partidas guardadas…").setNegativeButton("Cancelar", null).create();
         showCheckpointSaveDialog(loading);
         checkpointWorker = new Thread(() -> {
@@ -194,7 +201,7 @@ public class HaloActivity extends SDLActivity {
             } catch (IOException e) {
                 checkpointHandler.post(() -> {
                     if (checkpointSaveDialog == loading && !isFinishing() && !isDestroyed())
-                        showCheckpointSaveDialog(new AlertDialog.Builder(this).setTitle("No se pudieron leer las partidas")
+                        showCheckpointSaveDialog(GameMenuStyle.builder(this).setTitle("No se pudieron leer las partidas")
                             .setMessage("Tus guardados se conservan. Comprueba el almacenamiento e inténtalo de nuevo.")
                             .setPositiveButton("Volver a pausa", null).create());
                 });
@@ -214,7 +221,7 @@ public class HaloActivity extends SDLActivity {
         for (CheckpointSlots.Entry entry : entries) {
             Button replace = new Button(this);
             replace.setText(SaveLabels.label(entry));
-            replace.setOnClickListener(v -> showCheckpointSaveDialog(new AlertDialog.Builder(this)
+            replace.setOnClickListener(v -> showCheckpointSaveDialog(GameMenuStyle.builder(this)
                 .setTitle("Reemplazar partida")
                 .setMessage("¿Reemplazar «" + entry.name + "» con el último punto de control de esta partida?")
                 .setPositiveButton("Reemplazar", (dialog, which) -> beginCheckpointSave(entry.id, entry.name))
@@ -223,7 +230,8 @@ public class HaloActivity extends SDLActivity {
         }
         ScrollView scroll = new ScrollView(this);
         scroll.addView(content);
-        showCheckpointSaveDialog(new AlertDialog.Builder(this).setTitle("Guardar partida")
+        GameMenuStyle.content(scroll);
+        showCheckpointSaveDialog(GameMenuStyle.builder(this).setTitle("Guardar partida")
             .setMessage(entries.size() >= CheckpointSlots.MAX_SLOTS
                 ? "Hay 10 partidas. Elige una para reemplazarla."
                 : "Crea otra partida o elige cuál reemplazar. Se guarda el último punto de control.")
@@ -236,7 +244,8 @@ public class HaloActivity extends SDLActivity {
         name.setImeOptions(EditorInfo.IME_ACTION_DONE | EditorInfo.IME_FLAG_NO_EXTRACT_UI
             | EditorInfo.IME_FLAG_NO_FULLSCREEN);
         name.setHint("Nombre de la partida");
-        AlertDialog dialog = new AlertDialog.Builder(this).setTitle("Nueva partida guardada")
+        GameMenuStyle.content(name);
+        AlertDialog dialog = GameMenuStyle.builder(this).setTitle("Nueva partida guardada")
             .setView(name).setPositiveButton("Guardar y salir", null).setNegativeButton("Cancelar", null).create();
         showCheckpointSaveDialog(dialog);
         Runnable save = () -> {
@@ -282,6 +291,7 @@ public class HaloActivity extends SDLActivity {
             }
         });
         dialog.show();
+        GameMenuStyle.style(dialog);
         if (previous != null)
             previous.dismiss();
         if (touchPauseDialog != null)
@@ -430,7 +440,7 @@ public class HaloActivity extends SDLActivity {
                     : "No se pudo escribir el punto de control. La partida sigue abierta.";
                 break;
         }
-        AlertDialog error = new AlertDialog.Builder(this)
+        AlertDialog error = GameMenuStyle.builder(this)
             .setTitle(restoring ? "No se pudo continuar" : "No se pudo guardar")
             .setMessage(message)
             .setPositiveButton(restoring ? "Salir" : "Volver a pausa", null).create();
@@ -450,6 +460,7 @@ public class HaloActivity extends SDLActivity {
             }
         });
         error.show();
+        GameMenuStyle.style(error);
     }
 
     private void removeCheckpointProgress() {
@@ -537,7 +548,7 @@ public class HaloActivity extends SDLActivity {
         String message = export
             ? "Choose the folder and the name of the touch layout file."
             : "Choose a touch layout file. It replaces your buttons, the look sensitivity and the General settings.";
-        new AlertDialog.Builder(this)
+        AlertDialog prompt = GameMenuStyle.builder(this)
             .setTitle(export ? "Export the layout" : "Import a layout")
             .setMessage(message)
             .setNegativeButton("Cancel", null)
@@ -556,7 +567,9 @@ public class HaloActivity extends SDLActivity {
                     Toast.makeText(this, "This device has no file picker.", Toast.LENGTH_LONG).show();
                 }
             })
-            .show();
+            .create();
+        prompt.show();
+        GameMenuStyle.style(prompt);
     }
 
     @Override
@@ -631,11 +644,13 @@ public class HaloActivity extends SDLActivity {
     private void layoutFileError(Exception error) {
         if (isFinishing() || isDestroyed())
             return;
-        new AlertDialog.Builder(this)
+        AlertDialog dialog = GameMenuStyle.builder(this)
             .setTitle("Touch layout file")
             .setMessage("The operation did not complete: " + error.getMessage())
             .setPositiveButton("OK", null)
-            .show();
+            .create();
+        dialog.show();
+        GameMenuStyle.style(dialog);
     }
 
     @Override

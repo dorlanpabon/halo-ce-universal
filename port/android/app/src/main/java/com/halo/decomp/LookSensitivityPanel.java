@@ -18,7 +18,7 @@ import java.util.Locale;
 /** A sensitivity draft and a local camera preview; neither sends input to the game. */
 final class LookSensitivityPanel extends LinearLayout {
     private static final float STEP = 0.025f;
-    private static final int ACCENT = 0xffffc400;
+    private static final int ACCENT = 0xff9ee3f4;
     private final TextView valueLabel;
     private final SeekBar slider;
     private final CameraPreview preview;
@@ -38,7 +38,7 @@ final class LookSensitivityPanel extends LinearLayout {
         super(context);
         setOrientation(HORIZONTAL);
         setPadding(dp(12), dp(8), dp(12), dp(8));
-        setBackgroundColor(0xff10171b);
+        setBackgroundColor(0xff101b27);
         setGravity(Gravity.CENTER_VERTICAL);
 
         ScrollView scroll = new ScrollView(context);
@@ -154,7 +154,7 @@ final class LookSensitivityPanel extends LinearLayout {
         button.setMinWidth(0);
         button.setMinimumWidth(0);
         button.setPadding(dp(3), 0, dp(3), 0);
-        button.setBackgroundTintList(ColorStateList.valueOf(0xff27333a));
+        button.setBackgroundTintList(ColorStateList.valueOf(0xff182936));
         button.setTextColor(0xffeeeeee);
         return button;
     }

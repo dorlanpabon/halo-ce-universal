@@ -120,7 +120,7 @@ public final class GraphicsProfiles {
         String[] choices = new String[PROFILES.length];
         for (int i = 0; i < PROFILES.length; i++)
             choices[i] = PROFILES[i].name;
-        open.accept(new AlertDialog.Builder(activity)
+        open.accept(GameMenuStyle.builder(activity)
             .setTitle("Perfiles gráficos · " + (active >= 0 ? PROFILES[active].name : "Personalizado"))
             .setSingleChoiceItems(choices, selected[0], (dialog, which) -> selected[0] = which)
             .setPositiveButton("Revisar", (dialog, which) -> confirm(activity, root, selected[0], restart, open))
@@ -130,7 +130,7 @@ public final class GraphicsProfiles {
 
     private static void confirm(Activity activity, File root, int index, Runnable restart, Consumer<AlertDialog> open) {
         Profile profile = PROFILES[index];
-        open.accept(new AlertDialog.Builder(activity)
+        open.accept(GameMenuStyle.builder(activity)
             .setTitle("Aplicar «" + profile.name + "»")
             .setMessage(profile.description + "\n\nRequiere reiniciar el juego. "
                 + "Se perderá el avance desde el último punto de control.")
@@ -140,7 +140,7 @@ public final class GraphicsProfiles {
     }
 
     private static void save(Activity activity, File root, int index, Runnable restart, Consumer<AlertDialog> open) {
-        AlertDialog saving = new AlertDialog.Builder(activity)
+        AlertDialog saving = GameMenuStyle.builder(activity)
             .setMessage("Guardando el perfil gráfico…")
             .setCancelable(false)
             .create();
@@ -164,7 +164,7 @@ public final class GraphicsProfiles {
     }
 
     private static void error(Activity activity, Consumer<AlertDialog> open, String message) {
-        open.accept(new AlertDialog.Builder(activity).setTitle("Perfil gráfico")
+        open.accept(GameMenuStyle.builder(activity).setTitle("Perfil gráfico")
             .setMessage(message).setPositiveButton("Cerrar", null).create());
     }
 
