@@ -781,7 +781,6 @@ public final class TouchControls extends View implements SensorEventListener, In
         int stick = TouchLayout.LEFT;
         if (target == NOTHING && layout.floatingStick && !hidden && layout.shown(stick) && !held(stick)
                 && inFloatingZone(x, y) && !inGestureZone(px, py, false)) {
-            floatStick(x, y);
             target = stick;
         }
         if (target == TOOLBAR_OPTIONS || target == TOOLBAR_TOGGLE
@@ -791,6 +790,9 @@ public final class TouchControls extends View implements SensorEventListener, In
             owners.put(id, target);
             if (layout.type(target) == TouchLayout.LEFT) {
                 cancelAutoWalk();
+                // Every floating-stick press starts neutral, including inside its resting circle.
+                if (layout.floatingStick)
+                    floatStick(x, y);
                 moveStick(target, x, y);
             } else
                 buttonTouches.put(id, new float[] {px, py});
