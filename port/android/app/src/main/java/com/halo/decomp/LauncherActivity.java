@@ -517,8 +517,12 @@ public class LauncherActivity extends Activity {
 
     private void buildInterface() {
         LauncherScreen screen = new LauncherScreen(this, haveData(), haveDemo(), () -> {
-            if (!DataPackages.isBusy())
+            if (DataPackages.isBusy())
+                return;
+            if (haveData())
                 startGameAfterDriver();
+            else
+                DataPackages.show(this, this::buildInterface, dialog -> dialog.show());
         }, this::startDemo, () -> {
             if (DataPackages.isBusy())
                 return;

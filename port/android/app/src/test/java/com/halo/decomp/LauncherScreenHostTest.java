@@ -122,7 +122,7 @@ public class LauncherScreenHostTest {
     @Test public void missingDataOffersDemoDownloadAndImport() {
         LauncherScreen screen = screen(false, false, 1f);
         assertEquals("Descargar y jugar demo", screen.demo.getText().toString());
-        assertFalse(screen.play.isEnabled());
+        assertTrue(screen.play.isEnabled());
         assertTrue(screen.demo.isEnabled());
         assertTrue(screen.pick.isEnabled());
     }
@@ -171,7 +171,7 @@ public class LauncherScreenHostTest {
             Button[] current = actions(screen);
             for (int i = 0; i < original.length; i++)
                 assertSame(original[i], current[i]);
-            assertFalse(screen.play.isEnabled());
+            assertTrue(screen.play.isEnabled());
             assertTrue(screen.pick.isEnabled());
         }
         screen.demo.performClick();

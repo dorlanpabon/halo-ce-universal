@@ -40,7 +40,14 @@ public class DataPackagesHostTest {
         File root;
         @Override public File getExternalFilesDir(String type) { return root; }
     }
+    public static class TestLauncherActivity extends LauncherActivity {
+        File root;
+        @Override public File getExternalFilesDir(String type) { return root; }
+        @Override boolean hasRunningGame() { return false; }
+        @Override void startGame() { fail("Missing data must not start the game"); }
+    }
     private TestActivity activity;
+    private TestLauncherActivity launcher;
 
     @Before public void prepare() throws Exception {
         activity = Robolectric.buildActivity(TestActivity.class).setup().get();
@@ -51,6 +58,8 @@ public class DataPackagesHostTest {
         AlertDialog dialog = ShadowAlertDialog.getLatestAlertDialog();
         if (dialog != null)
             dialog.dismiss();
+        if (launcher != null)
+            launcher.finish();
         activity.finish();
     }
 
@@ -100,6 +109,88 @@ public class DataPackagesHostTest {
         data.performClick();
         assertNotNull(find(ShadowAlertDialog.getLatestAlertDialog().getWindow().getDecorView(), EditText.class, null));
         launcher.finish();
+    }
+
+    @Test public void playWithoutDataOpensMediaFireHttpsFormBeforeAnyGameStartup() throws Exception {
+        Button play = missingDataPlayButton();
+        assertTrue(play.isEnabled());
+        play.performClick();
+        AlertDialog form = ShadowAlertDialog.getLatestAlertDialog();
+        assertNotNull(form);
+        assertTrue(form.isShowing());
+        assertEquals("Descargar paquete de datos", shadowOf(form).getTitle());
+        EditText address = find(form.getWindow().getDecorView(), EditText.class, null);
+        assertNotNull(address);
+        assertEquals("", address.getText().toString());
+        assertTrue(address.getHint().toString().contains("MediaFire"));
+        assertTrue(address.getHint().toString().contains("HTTPS"));
+        assertEquals("Descargar", form.getButton(AlertDialog.BUTTON_POSITIVE).getText().toString());
+        assertMissingDataFlowUntouched();
+    }
+
+    @Test public void cancellingMissingDataDownloadReturnsToTheSameLauncher() throws Exception {
+        Button play = missingDataPlayButton();
+        play.performClick();
+        AlertDialog form = ShadowAlertDialog.getLatestAlertDialog();
+        assertNotNull(form);
+        form.getButton(AlertDialog.BUTTON_NEGATIVE).performClick();
+        shadowOf(Looper.getMainLooper()).idle();
+        assertFalse(form.isShowing());
+        assertFalse(launcher.isFinishing());
+        assertSame(play, find(launcher.getWindow().getDecorView(), Button.class, "Jugar / Continuar"));
+        assertTrue(play.isEnabled());
+        assertMissingDataFlowUntouched();
+    }
+
+    @Test public void playWithoutDataDoesNotOpenAnotherFlowWhileDownloadIsBusy() throws Exception {
+        Button play = missingDataPlayButton();
+        AlertDialog previous = ShadowAlertDialog.getLatestAlertDialog();
+        AtomicBoolean busy = ReflectionHelpers.getStaticField(DataPackages.class, "busy");
+        busy.set(true);
+        try {
+            play.performClick();
+            shadowOf(Looper.getMainLooper()).idle();
+            assertSame(previous, ShadowAlertDialog.getLatestAlertDialog());
+            assertTrue(DataPackages.isBusy());
+            assertNoGameStartupOrFileChanges();
+        } finally {
+            busy.set(false);
+        }
+    }
+
+    private Button missingDataPlayButton() throws Exception {
+        Files.write(new File(activity.root, "init.txt").toPath(), "startup fixture".getBytes(StandardCharsets.UTF_8));
+        assertTrue(new File(activity.root, "save/z").mkdirs());
+        Files.write(new File(activity.root, "save/z/mobile-checkpoint.bin").toPath(),
+            "checkpoint fixture".getBytes(StandardCharsets.UTF_8));
+        launcher = Robolectric.buildActivity(TestLauncherActivity.class).get();
+        launcher.root = activity.root;
+        ReflectionHelpers.setField(launcher, "dataRoot", activity.root);
+        ReflectionHelpers.callInstanceMethod(launcher, "buildInterface");
+        Button play = find(launcher.getWindow().getDecorView(), Button.class, "Jugar / Continuar");
+        assertNotNull(play);
+        assertFalse(new File(activity.root, "maps/ui.map").exists());
+        return play;
+    }
+
+    private void assertMissingDataFlowUntouched() throws Exception {
+        assertFalse(DataPackages.isBusy());
+        assertNoGameStartupOrFileChanges();
+    }
+
+    private void assertNoGameStartupOrFileChanges() throws Exception {
+        assertNull(shadowOf(launcher).getNextStartedActivity());
+        assertFalse((Boolean) ReflectionHelpers.getField(launcher, "driverStarted"));
+        assertFalse((Boolean) ReflectionHelpers.getField(launcher, "checkpointChoiceStarted"));
+        assertNull(ReflectionHelpers.getField(launcher, "checkpointWorker"));
+        assertEquals("startup fixture", new String(Files.readAllBytes(new File(activity.root, "init.txt").toPath()),
+            StandardCharsets.UTF_8));
+        assertEquals("checkpoint fixture", new String(Files.readAllBytes(
+            new File(activity.root, "save/z/mobile-checkpoint.bin").toPath()), StandardCharsets.UTF_8));
+        for (String suffix : new String[] { ".boot", ".request", ".status", ".tmp" })
+            assertFalse(new File(activity.root, "save/z/mobile-checkpoint" + suffix).exists());
+        assertFalse(new File(activity.root, "maps/ui.map").exists());
+        assertFalse(new File(launcher.getCacheDir(), "game-data.partial").exists());
     }
 
     @Test public void blockedMediaFirePageCanOpenInUserBrowserWithoutDownloadingPayload() {

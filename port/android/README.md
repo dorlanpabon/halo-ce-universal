@@ -184,6 +184,10 @@ on-screen keyboard, tap a key to press it, "B =BACK" to cancel and
 
 ### Touch controls
 
+The launcher's "Jugar / Continuar" stays available without game data and opens
+the data-download form instead of starting the engine. Installed data keeps
+the usual Play / Continue flow; demo download and local ISO import remain available.
+
 In a game, the app shows touch controls over the picture. They are a
 controller for player 1. With the default buttons of the profile:
 
