@@ -7,6 +7,7 @@ import android.os.Looper;
 import android.view.KeyEvent;
 import android.view.View;
 import android.view.ViewGroup;
+import android.view.inputmethod.EditorInfo;
 import android.widget.Button;
 import android.widget.FrameLayout;
 import android.widget.EditText;
@@ -234,6 +235,32 @@ public class CheckpointUiHostTest {
         assertTrue(naming.isShowing());
         assertNotNull(findName(naming.getWindow().getDecorView()).getError());
         assertFalse(checkpoint(".request").exists());
+    }
+
+    @Test public void landscapeNameUsesDoneWithoutFullscreenAndStartsOneSave() throws Exception {
+        activity.showTouchPauseMenu();
+        activity.startCheckpointSave();
+        joinWorker();
+        button(ShadowAlertDialog.getLatestAlertDialog().getWindow().getDecorView(), "Nueva partida guardada").performClick();
+        AlertDialog naming = ShadowAlertDialog.getLatestAlertDialog();
+        EditText name = findName(naming.getWindow().getDecorView());
+        assertEquals(EditorInfo.IME_ACTION_DONE, name.getImeOptions() & EditorInfo.IME_MASK_ACTION);
+        assertNotEquals(0, name.getImeOptions() & EditorInfo.IME_FLAG_NO_EXTRACT_UI);
+        assertNotEquals(0, name.getImeOptions() & EditorInfo.IME_FLAG_NO_FULLSCREEN);
+        name.onEditorAction(EditorInfo.IME_ACTION_DONE);
+        assertTrue(naming.isShowing());
+        assertNotNull(name.getError());
+        assertFalse(checkpoint(".request").exists());
+        name.setText("Mi partida con teclado");
+        name.onEditorAction(EditorInfo.IME_ACTION_DONE);
+        String id = ReflectionHelpers.getField(activity, "checkpointRequestId");
+        assertNotNull(id);
+        waitForRequest();
+        name.onEditorAction(EditorInfo.IME_ACTION_DONE);
+        assertEquals(id, ReflectionHelpers.getField(activity, "checkpointRequestId"));
+        assertTrue(new String(Files.readAllBytes(checkpoint(".request").toPath()), StandardCharsets.US_ASCII)
+            .startsWith(id + " save "));
+        assertFalse(naming.isShowing());
     }
 
     @Test public void savedAcknowledgementAddsAnotherNamedSlotBeforeExit() throws Exception {
