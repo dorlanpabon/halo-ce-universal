@@ -2,6 +2,7 @@ package com.halo.decomp;
 
 import android.app.Activity;
 import android.app.AlertDialog;
+import android.content.Context;
 import android.util.DisplayMetrics;
 import android.view.View;
 import android.widget.AdapterView;
@@ -82,7 +83,7 @@ public final class ScreenSettings {
         View decor = activity.getWindow().getDecorView();
         int displayWidth = decor.getWidth() > 0 ? decor.getWidth() : metrics.widthPixels;
         int displayHeight = decor.getHeight() > 0 ? decor.getHeight() : metrics.heightPixels;
-        AlertDialog dialog = new AlertDialog.Builder(activity)
+        AlertDialog dialog = GameMenuStyle.builder(activity)
             .setTitle("Pantalla y resolución")
             .setView(scroll)
             .setNegativeButton("Cancelar", null)
@@ -122,11 +123,12 @@ public final class ScreenSettings {
         TextView title = new TextView(activity);
         title.setText(label);
         content.addView(title);
-        Spinner spinner = new Spinner(activity);
+        Context themed = GameMenuStyle.builder(activity).getContext();
+        Spinner spinner = new Spinner(themed);
         spinner.setId(View.generateViewId());
         spinner.setContentDescription(label);
         title.setLabelFor(spinner.getId());
-        ArrayAdapter<String> adapter = new ArrayAdapter<>(activity, android.R.layout.simple_spinner_item, choices);
+        ArrayAdapter<String> adapter = new ArrayAdapter<>(themed, android.R.layout.simple_spinner_item, choices);
         adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
         spinner.setAdapter(adapter);
         content.addView(spinner, new LinearLayout.LayoutParams(-1, -2));
@@ -135,7 +137,7 @@ public final class ScreenSettings {
 
     private static void confirm(Activity activity, File root, int width, float scale, String preview,
             Runnable restart, Consumer<AlertDialog> open) {
-        open.accept(new AlertDialog.Builder(activity).setTitle("Aplicar pantalla y resolución")
+        open.accept(GameMenuStyle.builder(activity).setTitle("Aplicar pantalla y resolución")
             .setMessage(preview + ".\n\nRequiere reiniciar el juego. Se perderá el avance desde el último punto de control.")
             .setNegativeButton("Cancelar", null)
             .setPositiveButton("Aplicar y reiniciar", (dialog, which) -> save(activity, root, width, scale, restart, open))
@@ -144,7 +146,7 @@ public final class ScreenSettings {
 
     private static void save(Activity activity, File root, int width, float scale,
             Runnable restart, Consumer<AlertDialog> open) {
-        AlertDialog saving = new AlertDialog.Builder(activity).setMessage("Guardando la resolución…")
+        AlertDialog saving = GameMenuStyle.builder(activity).setMessage("Guardando la resolución…")
             .setCancelable(false).create();
         open.accept(saving);
         new Thread(() -> {
@@ -164,7 +166,7 @@ public final class ScreenSettings {
     }
 
     private static void error(Activity activity, Consumer<AlertDialog> open, IOException error) {
-        open.accept(new AlertDialog.Builder(activity).setTitle("Pantalla y resolución")
+        open.accept(GameMenuStyle.builder(activity).setTitle("Pantalla y resolución")
             .setMessage("No se pudo guardar o leer la resolución: " + error.getMessage())
             .setPositiveButton("Cerrar", null).create());
     }
