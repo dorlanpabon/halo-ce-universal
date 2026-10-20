@@ -251,6 +251,116 @@ public class TouchControlsMultitouchHostTest {
         assertReleased();
     }
 
+    @Test public void floatingStickStartsNeutralAndFollowsEachDragInsideItsHomeCircle() {
+        layout.floatingStick = true;
+        float sx = layout.x(TouchLayout.LEFT), sy = layout.y(TouchLayout.LEFT);
+        float radius = layout.radius(TouchLayout.LEFT);
+        for (float[] direction : new float[][] {{1, 0}, {-1, 0}, {0, 1}, {0, -1}}) {
+            float x = sx - direction[0] * radius * .6f;
+            float y = sy - direction[1] * radius * .6f;
+            for (int tap = 0; tap < 3; tap++) {
+                event(MotionEvent.ACTION_DOWN, point(11, x, y));
+                assertEquals("An offset tap without a drag never starts walking", 0, NativeSink.state[0]);
+                assertEquals(0, NativeSink.state[1]);
+                event(MotionEvent.ACTION_UP, point(11, x, y));
+                assertReleased();
+            }
+            event(MotionEvent.ACTION_DOWN, point(11, x, y));
+            assertEquals("A floating touch starts at rest, including inside the home circle", 0, NativeSink.state[0]);
+            assertEquals(0, NativeSink.state[1]);
+            for (float distance : new float[] {.2f, .35f}) {
+                // The finger remains on the opposite side of the old fixed center.
+                event(MotionEvent.ACTION_MOVE, point(11, x + direction[0] * radius * distance,
+                    y + direction[1] * radius * distance));
+                assertMovementDirection(direction);
+            }
+            event(MotionEvent.ACTION_UP, point(11, x + direction[0] * radius * .35f,
+                y + direction[1] * radius * .35f));
+            assertReleased();
+            layout.floatingStick = false;
+            event(MotionEvent.ACTION_DOWN, point(11, x, y));
+            int axis = direction[0] == 0 ? 1 : 0;
+            float sign = direction[axis];
+            assertTrue("Fixed mode still moves immediately relative to its fixed center",
+                NativeSink.state[axis] * sign < 0);
+            event(MotionEvent.ACTION_UP, point(11, x, y));
+            assertReleased();
+            layout.floatingStick = true;
+        }
+    }
+
+    @Test public void floatingStickReanchorsEveryDirectionAfterAutomaticWalkingUsedAnotherCenter() {
+        layout.floatingStick = true;
+        float sx = layout.x(TouchLayout.LEFT), sy = layout.y(TouchLayout.LEFT);
+        float radius = layout.radius(TouchLayout.LEFT);
+        for (float[] direction : new float[][] {{1, 0}, {-1, 0}, {0, 1}, {0, -1}}) {
+            event(MotionEvent.ACTION_DOWN, point(11, 300, 440));
+            event(MotionEvent.ACTION_MOVE, point(11, 300, 440 - radius));
+            advance(600);
+            event(MotionEvent.ACTION_UP, point(11, 300, 440 - radius));
+            assertTrue(autoWalkLocked());
+            assertEquals(-32767, NativeSink.state[1]);
+            float x = sx - direction[0] * radius * .6f;
+            float y = sy - direction[1] * radius * .6f;
+            event(MotionEvent.ACTION_DOWN, point(17, x, y));
+            assertFalse("A new thumb cancels the old automatic walk", autoWalkLocked());
+            assertEquals("The previous floating center cannot move a new thumb", 0, NativeSink.state[0]);
+            assertEquals(0, NativeSink.state[1]);
+            event(MotionEvent.ACTION_MOVE, point(17, x + direction[0] * radius * .35f,
+                y + direction[1] * radius * .35f));
+            assertMovementDirection(direction);
+            event(MotionEvent.ACTION_UP, point(17, x + direction[0] * radius * .35f,
+                y + direction[1] * radius * .35f));
+            assertReleased();
+        }
+    }
+
+    @Test public void floatingStickReanchorsWhileAimAndFireStayHeldInEveryDirection() {
+        layout.floatingStick = true;
+        float sx = layout.x(TouchLayout.LEFT), sy = layout.y(TouchLayout.LEFT);
+        float radius = layout.radius(TouchLayout.LEFT);
+        float fx = layout.x(4), fy = layout.y(4);
+        for (float[] direction : new float[][] {{1, 0}, {-1, 0}, {0, 1}, {0, -1}}) {
+            controls.reset();
+            event(MotionEvent.ACTION_DOWN, point(23, fx, fy));
+            event(pointerDown(1), point(23, fx, fy), point(27, 570, 240));
+            float x = sx - direction[0] * radius * .6f;
+            float y = sy - direction[1] * radius * .6f;
+            event(pointerDown(2), point(23, fx, fy), point(27, 570, 240), point(11, x, y));
+            assertEquals(0, NativeSink.state[0]);
+            assertEquals(0, NativeSink.state[1]);
+            assertEquals(32767, NativeSink.state[5]);
+            float mx = x + direction[0] * radius * .35f;
+            float my = y + direction[1] * radius * .35f;
+            event(MotionEvent.ACTION_MOVE, point(27, 590, 225), point(11, mx, my), point(23, fx, fy));
+            assertMovementDirection(direction);
+            assertEquals(32767, NativeSink.state[5]);
+            assertEquals(20, NativeSink.lookX, .001f);
+            assertEquals(-15, NativeSink.lookY, .001f);
+            event(pointerUp(1), point(27, 590, 225), point(11, mx, my), point(23, fx, fy));
+            assertEquals(0, NativeSink.state[0]);
+            assertEquals(0, NativeSink.state[1]);
+            assertEquals("Lifting movement preserves the held fire finger", 32767, NativeSink.state[5]);
+            event(MotionEvent.ACTION_MOVE, point(27, 605, 230), point(23, fx, fy));
+            assertEquals(35, NativeSink.lookX, .001f);
+            assertEquals(-10, NativeSink.lookY, .001f);
+            event(MotionEvent.ACTION_CANCEL, point(27, 605, 230), point(23, fx, fy));
+            assertReleased();
+        }
+    }
+
+    private static void assertMovementDirection(float[] direction) {
+        if (direction[0] != 0) {
+            assertTrue("Horizontal movement follows the thumb, never the previous center",
+                NativeSink.state[0] * direction[0] > 0);
+            assertEquals(0, NativeSink.state[1]);
+        } else {
+            assertEquals(0, NativeSink.state[0]);
+            assertTrue("Vertical movement follows the thumb, never the previous center",
+                NativeSink.state[1] * direction[1] > 0);
+        }
+    }
+
     @Test public void contextualActionShowsXboxXAndUsarWhileInventorySwitchShowsYAndArma() {
         Bitmap bitmap = Bitmap.createBitmap(960, 540, Bitmap.Config.ARGB_8888);
         Canvas canvas = new Canvas(bitmap);
