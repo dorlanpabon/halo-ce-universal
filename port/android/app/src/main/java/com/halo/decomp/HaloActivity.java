@@ -22,6 +22,8 @@ import android.view.ViewGroup;
 import android.view.WindowInsets;
 import android.view.WindowInsetsController;
 import android.view.WindowManager;
+import android.view.inputmethod.EditorInfo;
+import android.view.inputmethod.InputMethodManager;
 import android.widget.Toast;
 import android.widget.Button;
 import android.widget.FrameLayout;
@@ -231,11 +233,13 @@ public class HaloActivity extends SDLActivity {
     private void showCheckpointName() {
         EditText name = new EditText(this);
         name.setSingleLine(true);
+        name.setImeOptions(EditorInfo.IME_ACTION_DONE | EditorInfo.IME_FLAG_NO_EXTRACT_UI
+            | EditorInfo.IME_FLAG_NO_FULLSCREEN);
         name.setHint("Nombre de la partida");
         AlertDialog dialog = new AlertDialog.Builder(this).setTitle("Nueva partida guardada")
             .setView(name).setPositiveButton("Guardar y salir", null).setNegativeButton("Cancelar", null).create();
         showCheckpointSaveDialog(dialog);
-        dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> {
+        Runnable save = () -> {
             String raw = name.getText().toString();
             String text = raw.trim();
             boolean invalid = text.isEmpty() || text.getBytes(StandardCharsets.UTF_8).length > 160;
@@ -243,8 +247,19 @@ public class HaloActivity extends SDLActivity {
                 invalid |= Character.isISOControl(raw.charAt(index)) || Character.isSurrogate(raw.charAt(index));
             if (invalid)
                 name.setError("Escribe un nombre corto sin saltos de línea.");
-            else
+            else {
+                InputMethodManager keyboard = (InputMethodManager) getSystemService(Context.INPUT_METHOD_SERVICE);
+                if (keyboard != null)
+                    keyboard.hideSoftInputFromWindow(name.getWindowToken(), 0);
                 beginCheckpointSave(null, text);
+            }
+        };
+        dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> save.run());
+        name.setOnEditorActionListener((view, action, event) -> {
+            if (action != EditorInfo.IME_ACTION_DONE)
+                return false;
+            save.run();
+            return true;
         });
     }
 
