@@ -4,6 +4,9 @@ import android.app.AlertDialog;
 import android.app.Application;
 import android.os.Looper;
 import android.view.KeyEvent;
+import android.view.View;
+import android.view.ViewGroup;
+import android.widget.Button;
 import android.widget.FrameLayout;
 
 import org.junit.After;
@@ -31,8 +34,14 @@ import static org.robolectric.Shadows.shadowOf;
     shadows = {PauseMenuHostTest.EngineBoundary.class, TouchControlsMultitouchHostTest.NativeSink.class})
 @LooperMode(LooperMode.Mode.PAUSED)
 public class PauseMenuHostTest {
-    private HaloActivity activity;
+    private RecordingActivity activity;
     private TouchControls controls;
+
+    public static class RecordingActivity extends HaloActivity {
+        int exits, saveRequests;
+        @Override void exitCheckpointGame() { exits++; }
+        @Override void startCheckpointSave() { saveRequests++; }
+    }
 
     @Implements(SDLActivity.class)
     public static class EngineBoundary extends ShadowActivity {
@@ -46,7 +55,7 @@ public class PauseMenuHostTest {
 
     @Before public void prepare() {
         EngineBoundary.pauses = EngineBoundary.resumes = 0;
-        activity = Robolectric.buildActivity(HaloActivity.class).get();
+        activity = Robolectric.buildActivity(RecordingActivity.class).get();
         FrameLayout root = new FrameLayout(activity);
         activity.setContentView(root);
         controls = new TouchControls(activity);
@@ -62,6 +71,8 @@ public class PauseMenuHostTest {
         AlertDialog dialog = ShadowAlertDialog.getLatestAlertDialog();
         if (dialog != null && dialog.isShowing())
             dialog.dismiss();
+        AlertDialog pause = ReflectionHelpers.getField(activity, "touchPauseDialog");
+        if (pause != null && pause.isShowing()) pause.dismiss();
         controls.stopDeviceInput();
         shadowOf(Looper.getMainLooper()).idle();
     }
@@ -133,5 +144,82 @@ public class PauseMenuHostTest {
             0, 0, -1, 0, KeyEvent.FLAG_CANCELED);
         assertTrue(activity.dispatchKeyEvent(canceled));
         assertNull(ReflectionHelpers.getField(activity, "touchPauseDialog"));
+    }
+
+    @Test public void originalMenuActionClosesPauseAndDefersWhileActivityIsNotResumed() {
+        activity.showTouchPauseMenu();
+        AlertDialog pause = ShadowAlertDialog.getLatestAlertDialog();
+        Button original = button(pause.getWindow().getDecorView(), "Configuración interna de Halo");
+        assertNotNull(original);
+        ReflectionHelpers.setField(activity, "activityResumed", false);
+        original.performClick();
+        shadowOf(Looper.getMainLooper()).idle();
+        assertFalse(pause.isShowing());
+        assertNull(ReflectionHelpers.getField(activity, "touchPauseDialog"));
+        assertTrue((boolean) ReflectionHelpers.getField(activity, "originalMenuRequested"));
+        assertEquals(0, EngineBoundary.resumes);
+        assertEquals(0, TouchControlsMultitouchHostTest.NativeSink.state[6]);
+    }
+
+    @Test public void settingsEntryTenRequestsTheOriginalMenuWithoutStartingInactiveGameplay() {
+        ReflectionHelpers.setField(activity, "activityResumed", false);
+        controls.showOptions();
+        AlertDialog settings = ShadowAlertDialog.getLatestAlertDialog();
+        assertEquals(11, settings.getListView().getAdapter().getCount());
+        View row = settings.getListView().getAdapter().getView(10, null, settings.getListView());
+        settings.getListView().performItemClick(row, 10, 10);
+        shadowOf(Looper.getMainLooper()).idle();
+        assertFalse(settings.isShowing());
+        assertTrue((boolean) ReflectionHelpers.getField(activity, "originalMenuRequested"));
+        assertEquals(0, EngineBoundary.resumes);
+    }
+
+    @Test public void cancelExitWithoutSavingKeepsThePausedGameAndNeverRequestsASave() {
+        activity.showTouchPauseMenu();
+        AlertDialog pause = ShadowAlertDialog.getLatestAlertDialog();
+        Button exit = button(pause.getWindow().getDecorView(), "Salir sin guardar");
+        assertNotNull(exit);
+        exit.performClick();
+        AlertDialog confirm = ShadowAlertDialog.getLatestAlertDialog();
+        assertNotSame(pause, confirm);
+        assertEquals("¿Salir sin guardar?", shadowOf(confirm).getTitle());
+        confirm.getButton(AlertDialog.BUTTON_NEGATIVE).performClick();
+        shadowOf(Looper.getMainLooper()).idle();
+        assertTrue(pause.isShowing());
+        assertSame(pause, ReflectionHelpers.getField(activity, "touchPauseDialog"));
+        assertEquals(0, activity.exits);
+        assertEquals(0, activity.saveRequests);
+        assertFalse((boolean) ReflectionHelpers.getField(activity, "checkpointExiting"));
+        assertEquals(0, EngineBoundary.resumes);
+    }
+
+    @Test public void confirmedExitWithoutSavingUsesExitPathWithoutCheckpointWork() {
+        activity.showTouchPauseMenu();
+        AlertDialog pause = ShadowAlertDialog.getLatestAlertDialog();
+        Button exit = button(pause.getWindow().getDecorView(), "Salir sin guardar");
+        assertNotNull(exit);
+        exit.performClick();
+        AlertDialog confirm = ShadowAlertDialog.getLatestAlertDialog();
+        assertEquals("Salir sin guardar", confirm.getButton(AlertDialog.BUTTON_POSITIVE).getText().toString());
+        confirm.getButton(AlertDialog.BUTTON_POSITIVE).performClick();
+        shadowOf(Looper.getMainLooper()).idle();
+        assertEquals(1, activity.exits);
+        assertEquals(0, activity.saveRequests);
+        assertTrue((boolean) ReflectionHelpers.getField(activity, "checkpointExiting"));
+        assertNull(ReflectionHelpers.getField(activity, "checkpointWorker"));
+        assertNull(ReflectionHelpers.getField(activity, "checkpointRequestId"));
+        assertEquals(0, EngineBoundary.resumes);
+    }
+
+    private Button button(View view, String text) {
+        if (view instanceof Button && text.contentEquals(((Button) view).getText())) return (Button) view;
+        if (view instanceof ViewGroup) {
+            ViewGroup group = (ViewGroup) view;
+            for (int i = 0; i < group.getChildCount(); i++) {
+                Button found = button(group.getChildAt(i), text);
+                if (found != null) return found;
+            }
+        }
+        return null;
     }
 }

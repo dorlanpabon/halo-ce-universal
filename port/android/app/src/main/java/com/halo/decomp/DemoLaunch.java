@@ -14,7 +14,7 @@ import java.nio.file.LinkOption;
 import java.nio.file.StandardCopyOption;
 import java.util.Arrays;
 
-/** One-shot demo bootstrap; recovery is safe only when the engine is not running. */
+/** One-shot demo or menu bootstrap; recover only when the engine is not running. */
 final class DemoLaunch {
     private static final int MAX_INIT = 256 * 1024;
     private static final int MAGIC = 0x4f434544;
@@ -34,16 +34,24 @@ final class DemoLaunch {
     }
 
     void prepare(String bootId) throws IOException {
+        prepare(bootId, true);
+    }
+
+    void prepareMenu(String bootId) throws IOException {
+        prepare(bootId, false);
+    }
+
+    private void prepare(String bootId, boolean demo) throws IOException {
         synchronized (DemoLaunch.class) {
             if (bootId == null || !bootId.matches("[0-9a-f]{32}"))
                 throw new IOException("Identificador de demo no válido.");
             if (Files.exists(journal.toPath(), LinkOption.NOFOLLOW_LINKS))
                 throw new IOException("Hay un inicio de demo pendiente de recuperar.");
-            if (!available())
-                throw new IOException("Faltan los mapas de la demo.");
+            if (demo ? !available() : !regular(new File(root, "maps/ui.map")))
+                throw new IOException(demo ? "Faltan los mapas de la demo." : "Falta el menú de Halo (ui.map).");
             boolean existed = Files.exists(init.toPath(), LinkOption.NOFOLLOW_LINKS);
             byte[] original = existed ? read(init, MAX_INIT) : new byte[0];
-            Pending pending = new Pending(bootId, existed, original, rewrite(original));
+            Pending pending = new Pending(bootId, existed, original, rewrite(original, demo));
             writeAtomic(journal, encode(pending));
             try {
                 writeAtomic(init, pending.prepared);
@@ -102,7 +110,8 @@ final class DemoLaunch {
             boolean existed = in.readBoolean();
             byte[] original = field(in, MAX_INIT), prepared = field(in, MAX_INIT + 64);
             if (!id.matches("[0-9a-f]{32}") || (!existed && original.length != 0)
-                    || in.available() != 0 || !Arrays.equals(prepared, rewrite(original)))
+                    || in.available() != 0 || (!Arrays.equals(prepared, rewrite(original, true))
+                        && !Arrays.equals(prepared, rewrite(original, false))))
                 throw new IOException("La copia de recuperación de la demo no es válida.");
             return new Pending(id, existed, original, prepared);
         }
@@ -131,7 +140,7 @@ final class DemoLaunch {
         return bytes;
     }
 
-    private static byte[] rewrite(byte[] original) throws IOException {
+    private static byte[] rewrite(byte[] original, boolean demo) throws IOException {
         ByteArrayOutputStream out = new ByteArrayOutputStream(original.length + 64);
         boolean replaced = false;
         for (int start = 0; start < original.length;) {
@@ -150,11 +159,14 @@ final class DemoLaunch {
             String line = new String(original, command, end - command, StandardCharsets.US_ASCII);
             if (line.matches("(?i)(?:map_name(?:[ \\t].*)?|\\([ \\t]*map_name(?:[ \\t].*|\\)[ \\t]*))")) {
                 out.write(original, start, command - start);
-                if (!replaced) {
+                if (demo && !replaced) {
                     out.write(COMMAND);
                     replaced = true;
                 }
             } else {
+                if (!demo && !line.startsWith("//") && !line.startsWith("#") && !line.startsWith(";")
+                        && line.matches("(?i).*\\bmap_name\\b.*"))
+                    throw new IOException("El inicio contiene un comando de mapa compuesto; se conservó sin cambios.");
                 out.write(original, start, end - start);
             }
             int next = end;
@@ -163,7 +175,7 @@ final class DemoLaunch {
             out.write(original, end, next - end);
             start = next;
         }
-        if (!replaced) {
+        if (demo && !replaced) {
             if (original.length > 0 && original[original.length - 1] != '\r' && original[original.length - 1] != '\n')
                 out.write('\n');
             out.write(COMMAND);

@@ -123,6 +123,14 @@ final class LauncherScreen extends FrameLayout {
         });
     }
 
+    void addGameMenuAction(boolean available, Runnable onGameMenu) {
+        Button internal = button("Configuración interna de Halo", 2, 13, onGameMenu);
+        internal.setEnabled(available);
+        LinearLayout.LayoutParams layout = new LinearLayout.LayoutParams(-1, -2);
+        layout.bottomMargin = dp(18);
+        actions.addView(internal, 3, layout);
+    }
+
     @Override protected void onMeasure(int widthMeasureSpec, int heightMeasureSpec) {
         boolean nextWide = MeasureSpec.getSize(widthMeasureSpec) / getResources().getDisplayMetrics().density >= 680
             && getResources().getConfiguration().fontScale <= 1.5f;

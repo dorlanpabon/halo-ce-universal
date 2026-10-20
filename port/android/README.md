@@ -138,7 +138,8 @@ row and slightly smaller Fire targets. Secondary buttons share a 34-unit radius;
 Fire uses 48 and left Fire 44 on the 960 x 540 layout grid. Unchanged earlier
 presets are upgraded; custom HUD positions, visibility and manually changed
 button sizes are preserved. Game Icons silhouettes
-replace the small line drawings; X / USAR and Y / ARMA match the game's prompts.
+replace the small line drawings; A / SALTO, B / GOLPE, X / USAR and Y / ARMA
+match the profile's actual button bindings without moving the controls.
 The icons' CC BY 3.0 attribution is in `assets/notices/game-icons.txt` in the APK.
 Touch Pause and Back open the Android pause dialog, including in demo maps
 without pause-menu tags. Reanudar or Atrás resumes; Ajustes de controles opens
@@ -217,7 +218,20 @@ aim slows over a target and follows a moving one, as with a controller,
 and it follows the profile's "invert look" (the gyroscope turns the view
 as the phone turns, never inverted). The setting `input.touch_aim_assist`
 turns the aim assist off. "Sensibilidad al mirar" sets how far a swipe turns;
-the mouse settings do not apply.
+the mouse settings do not apply. Its independent horizontal/vertical swipe
+inversion switches are saved on the device (off by default) and do not affect
+the gyroscope. Vertical swipe inversion combines with the active game profile's
+Invert Look / Invert Flight settings; the preview shows the touch adjustment.
+
+"Configuración interna de Halo" in Pause or the touch settings opens the
+original game menu. Tap Settings to edit the profile; Gamepads contains Invert
+Look and Invert Flight. Native menu taps pass through unchanged.
+The same launcher action opens the main menu on a cold start so a profile
+can be selected or created. It temporarily suppresses the startup map command,
+then restores init.txt exactly after the engine's acknowledgement. It never
+replaces named saves and refuses to restart an already running game.
+Pause/Back also offers "Salir sin guardar": confirming exits the game without
+creating or replacing a save. Cancelling leaves the game paused.
 
 The touch controls show only in a game. In the menus and during
 cinematics they hide, and the touchscreen operates the menus as described

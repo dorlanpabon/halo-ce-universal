@@ -22,15 +22,16 @@ final class TouchIcons {
         }
     }
 
-    /** Keep the Xbox prompt letter legible below the use / weapon silhouette. */
+    /** Keep the profile's Xbox button letter legible below its action silhouette. */
     void drawCaption(Canvas canvas, Paint paint, float x, float y, float radius,
             String button, String action) {
-        drawIcon(canvas, paint, x, y - radius * 0.17f, radius * 0.61f,
-            "USAR".equals(action) ? 2 : 3);
+        int icon = "SALTO".equals(action) ? 0 : "GOLPE".equals(action) ? 4
+            : "USAR".equals(action) ? 2 : 3;
+        drawIcon(canvas, paint, x, y - radius * 0.17f, radius * 0.61f, icon);
         paint.setStyle(Paint.Style.FILL);
         paint.setTextAlign(Paint.Align.CENTER);
         paint.setTextSize(radius * 0.27f);
-        // These are the only text captions: game prompts refer to X and Y.
+        // Fit both the button letter and action inside the existing touch circle.
         float gap = radius * 0.12f;
         float width = paint.measureText(button) + gap + paint.measureText(action);
         if (width > radius * 1.4f)

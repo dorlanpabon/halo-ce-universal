@@ -12,6 +12,7 @@ import android.view.ViewGroup;
 import android.widget.Button;
 import android.widget.FrameLayout;
 import android.widget.SeekBar;
+import android.widget.Switch;
 
 import org.junit.After;
 import org.junit.Before;
@@ -179,6 +180,8 @@ public class LookSensitivityPanelHostTest {
             install(new LookSensitivityPanel(activity, 1.5f, 1f));
             tap(button("Rápido"));
             tap(button("+"));
+            tap(inversion("Invertir deslizamiento horizontal"));
+            tap(inversion("Invertir deslizamiento vertical"));
             gesture(preview(), 50, 50, 90, 70, MotionEvent.ACTION_CANCEL);
             shadowOf(Looper.getMainLooper()).idle();
             assertEquals("No persistence until the containing dialog applies", 0, changes[0]);
@@ -240,6 +243,42 @@ public class LookSensitivityPanelHostTest {
         assertEquals(savedPreferences, preferences.getAll());
     }
 
+    @Test public void inversionSwitchesAreIndependentDraftsAndResetWithoutChangingSensitivity() {
+        assertFalse(panel.invertedHorizontal());
+        assertFalse(panel.invertedVertical());
+        tap(inversion("Invertir deslizamiento horizontal"));
+        assertTrue(panel.invertedHorizontal());
+        assertFalse(panel.invertedVertical());
+        tap(inversion("Invertir deslizamiento vertical"));
+        assertTrue(panel.invertedHorizontal());
+        assertTrue(panel.invertedVertical());
+        panel.setInvertedAxes(false, false);
+        assertFalse(inversion("Invertir deslizamiento horizontal").isChecked());
+        assertFalse(inversion("Invertir deslizamiento vertical").isChecked());
+        assertEquals(1f, panel.value(), 0f);
+        assertEquals(1f, panel.horizontalValue(), 0f);
+        assertEquals(savedPreferences, preferences.getAll());
+    }
+
+    @Test public void invertedPreviewSwipesReverseOnlyTheSelectedAxis() {
+        install(new LookSensitivityPanel(activity, 1.5f, 2.25f, 0.5f));
+        gesture(preview(), 50, 50, 90, 70, MotionEvent.ACTION_UP);
+        float normalYaw = yaw(preview());
+        float normalPitch = ReflectionHelpers.getField(preview(), "pitch");
+        assertTrue(normalYaw > 0 && normalPitch > 0);
+        for (boolean[] axes : new boolean[][] {{true, false}, {false, true}, {true, true}}) {
+            install(new LookSensitivityPanel(activity, 1.5f, 2.25f, 0.5f));
+            panel.setInvertedAxes(axes[0], axes[1]);
+            gesture(preview(), 50, 50, 90, 70, MotionEvent.ACTION_UP);
+            assertEquals("Only horizontal inversion changes the turn direction",
+                axes[0] ? -normalYaw : normalYaw, yaw(preview()), .0001f);
+            assertEquals("Only vertical inversion changes the pitch direction",
+                axes[1] ? -normalPitch : normalPitch,
+                ReflectionHelpers.<Float>getField(preview(), "pitch"), .0001f);
+        }
+        assertEquals(savedPreferences, preferences.getAll());
+    }
+
     private void install(LookSensitivityPanel next) {
         root.removeAllViews();
         panel = next;
@@ -257,6 +296,11 @@ public class LookSensitivityPanelHostTest {
     private SeekBar slider() { return (SeekBar) described("Sensibilidad de cámara"); }
     private View preview() { return described("Zona de prueba de cámara"); }
     private float yaw(View preview) { return ReflectionHelpers.getField(preview, "yaw"); }
+    private Switch inversion(String text) {
+        View result = find(panel, view -> view instanceof Switch && text.contentEquals(((Switch) view).getText()));
+        assertNotNull("Inversion option: " + text, result);
+        return (Switch) result;
+    }
     private Button button(String text) {
         View result = find(panel, view -> view instanceof Button && text.contentEquals(((Button) view).getText()));
         assertNotNull("Button: " + text, result);

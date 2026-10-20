@@ -61,8 +61,10 @@ public class HaloActivity extends SDLActivity {
     private String pendingLayoutExport;
     private AlertDialog touchPauseDialog;
     private boolean activityResumed;
+    private boolean originalMenuRequested;
     static final String CHECKPOINT_BOOT_ID = "checkpoint-boot-id";
     static final String DEMO_BOOT_ID = "demo-boot-id";
+    static final String GAME_MENU_BOOT_ID = "game-menu-boot-id";
     private final Handler checkpointHandler = new Handler(Looper.getMainLooper());
     private CheckpointStore checkpointStore;
     private CheckpointSlots checkpointSlots;
@@ -114,10 +116,22 @@ public class HaloActivity extends SDLActivity {
         int padding = Math.round(24 * getResources().getDisplayMetrics().density);
         actions.setPadding(padding, 0, padding, padding / 3);
         actions.addView(save, new LinearLayout.LayoutParams(-1, -2));
+        Button gameSettings = new Button(this);
+        gameSettings.setText("Configuración interna de Halo");
+        gameSettings.setOnClickListener(v -> openOriginalGameMenu());
+        GameMenuStyle.content(gameSettings);
+        actions.addView(gameSettings, new LinearLayout.LayoutParams(-1, -2));
+        Button exit = new Button(this);
+        exit.setText("Salir sin guardar");
+        exit.setOnClickListener(v -> confirmExitWithoutSaving());
+        GameMenuStyle.content(exit);
+        actions.addView(exit, new LinearLayout.LayoutParams(-1, -2));
+        ScrollView scroll = new ScrollView(this);
+        scroll.addView(actions);
         AlertDialog dialog = GameMenuStyle.builder(this)
             .setTitle("Pausa")
             .setMessage("Guarda el último punto de control, no la posición exacta al salir.")
-            .setView(actions)
+            .setView(scroll)
             .setPositiveButton("Reanudar", null)
             .setNeutralButton("Ajustes de controles", (d, which) -> touchControls.showOptions())
             .setNegativeButton("Atrás", null)
@@ -140,12 +154,43 @@ public class HaloActivity extends SDLActivity {
             || (touchControls != null && touchControls.isEditing());
     }
 
+    private void confirmExitWithoutSaving() {
+        if (checkpointBusy())
+            return;
+        AlertDialog confirm = GameMenuStyle.builder(this)
+            .setTitle("¿Salir sin guardar?")
+            .setMessage("Perderás el progreso desde el último punto guardado. Tus partidas guardadas se conservan.")
+            .setNegativeButton("Cancelar", null)
+            .setPositiveButton("Salir sin guardar", (d, which) -> {
+                if (!checkpointBusy()) {
+                    checkpointExiting = true;
+                    exitCheckpointGame();
+                }
+            }).create();
+        confirm.show();
+        GameMenuStyle.style(confirm);
+    }
+
+    void openOriginalGameMenu() {
+        if (checkpointBusy() || touchControls == null || isFinishing() || isDestroyed())
+            return;
+        originalMenuRequested = true;
+        if (touchPauseDialog != null)
+            touchPauseDialog.dismiss();
+        else
+            resumeTouchGameIfReady();
+    }
+
     private void resumeTouchGameIfReady() {
         if (!touchOverlayPaused() && activityResumed && !isFinishing() && !isDestroyed()
                 && getWindow().getDecorView().hasWindowFocus()) {
             resumeNativeThread();
             if (touchControls != null && !checkpointBusy())
                 touchControls.startDeviceInput();
+            if (originalMenuRequested && touchControls != null) {
+                originalMenuRequested = false;
+                touchControls.openGameMenu();
+            }
         }
     }
 
@@ -326,7 +371,8 @@ public class HaloActivity extends SDLActivity {
         text.setTextColor(Color.WHITE);
         text.setGravity(Gravity.CENTER);
         text.setPadding(24, 24, 24, 24);
-        text.setText(restoring ? (getIntent().hasExtra(DEMO_BOOT_ID) ? "Iniciando la demo…"
+        text.setText(restoring ? (getIntent().hasExtra(GAME_MENU_BOOT_ID) ? "Abriendo el menú de Halo…"
+            : getIntent().hasExtra(DEMO_BOOT_ID) ? "Iniciando la demo…"
             : "Continuando desde el último punto de control…")
             : "Guardando el último punto de control…\nLa aplicación se cerrará cuando el juego lo confirme.");
         progress.addView(text);
@@ -515,6 +561,8 @@ public class HaloActivity extends SDLActivity {
             watchCheckpoint(bootId, true);
         }
         String demoId = getIntent().getStringExtra(DEMO_BOOT_ID);
+        if (demoId == null)
+            demoId = getIntent().getStringExtra(GAME_MENU_BOOT_ID);
         if (demoId != null && demoId.matches("[0-9a-f]{32}"))
             watchDemoLaunch(demoId);
         // a new version looked for while the game starts
