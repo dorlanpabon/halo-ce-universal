@@ -99,6 +99,7 @@ public final class TouchControls extends View implements SensorEventListener, In
     private static final String KEY_CONFIGURATION = "configuration";
     private static final String KEY_HIDDEN = "hidden";
     private static final String KEY_AUTO_WALK = "auto-walk";
+    private static final String KEY_JUMP_MELEE_SWAPPED = "jump-melee-swapped-v1";
 
     /**
      * a kind of control: the SDL button bit or trigger axis it sends (-1 for
@@ -276,6 +277,7 @@ public final class TouchControls extends View implements SensorEventListener, In
         inputManager = (InputManager) context.getSystemService(Context.INPUT_SERVICE);
         touchscreenFeature = context.getPackageManager().hasSystemFeature(PackageManager.FEATURE_TOUCHSCREEN);
         preferences = context.getSharedPreferences(PREFERENCES, Context.MODE_PRIVATE);
+        migrateJumpMeleeLayout(context);
         autoWalkEnabled = preferences.getBoolean(KEY_AUTO_WALK, true);
         activeHud = Math.max(0, Math.min(2, preferences.getInt("hud-slot", 0)));
         loadLayout(context);
@@ -315,6 +317,27 @@ public final class TouchControls extends View implements SensorEventListener, In
             invalidate();
             return insets;
         });
+    }
+
+    private void migrateJumpMeleeLayout(Context context) {
+        if (preferences.getBoolean(KEY_JUMP_MELEE_SWAPPED, false))
+            return;
+        SharedPreferences.Editor changes = preferences.edit();
+        for (String key : new String[] {KEY_CONFIGURATION, "hud-layout-0", "hud-layout-1", "hud-layout-2"}) {
+            String configuration = preferences.getString(key, null);
+            if (configuration == null)
+                continue;
+            try {
+                TouchLayout.Configuration saved = TouchLayout.importConfiguration(configuration);
+                saved.layout.swapJumpMeleePositions();
+                changes.putString(key, saved.layout.exportConfiguration(saved.sensitivity, saved.horizontalSensitivity));
+            } catch (IllegalArgumentException e) {
+                // Leave an unreadable layout for the existing fallback and retain the user's file.
+            }
+        }
+        if (!changes.putBoolean(KEY_JUMP_MELEE_SWAPPED, true).commit())
+            Toast.makeText(context, "No se pudo guardar el cambio de Salto y Puño. Inténtalo de nuevo.",
+                Toast.LENGTH_LONG).show();
     }
 
     private void loadLayout(Context context) {

@@ -26,7 +26,7 @@ public class TouchDistributionHostTest {
         {100, 237}, {100, 335}, {51, 286}, {149, 286}, {130, 420}, {145, 110}
     };
     private static final float[][] ALIGNED = {
-        {900, 432}, {900, 342}, {812, 162}, {900, 162}, {780, 342}, {700, 480},
+        {900, 342}, {900, 432}, {812, 162}, {900, 162}, {780, 342}, {700, 480},
         {800, 480}, {900, 252}, {526, 480}, {612, 480}, {576, 68}, {390, 68},
         {100, 237}, {100, 335}, {51, 286}, {149, 286}, {130, 420}, {200, 230}
     };
@@ -41,16 +41,16 @@ public class TouchDistributionHostTest {
             TouchLayout layout = TouchLayout.importConfiguration(text).layout;
             assertAlignedPositions(layout);
             assertEquals(layout.savedY(2), layout.savedY(3), 0);
-            assertEquals(layout.savedY(1), layout.savedY(4), 0);
+            assertEquals(layout.savedY(0), layout.savedY(4), 0);
             assertEquals(layout.savedY(5), layout.savedY(6), 0);
             assertEquals(90, layout.savedY(7) - layout.savedY(3), 0);
-            assertEquals(90, layout.savedY(1) - layout.savedY(7), 0);
-            assertEquals(90, layout.savedY(0) - layout.savedY(1), 0);
+            assertEquals(90, layout.savedY(0) - layout.savedY(7), 0);
+            assertEquals(90, layout.savedY(1) - layout.savedY(0), 0);
             // 1612 x 720 display, using TouchControls' 4/3 pixel-to-logical scale.
             layout.bounds(1209, 540);
             layout.setMinimumRadius(34);
             layout.safeInsets(39, 137, 96.75f, 42);
-            for (int[] pair : new int[][] {{2, 3}, {3, 7}, {7, 1}, {1, 0}, {4, 1}, {5, 6}}) {
+            for (int[] pair : new int[][] {{2, 3}, {3, 7}, {7, 0}, {0, 1}, {4, 0}, {5, 6}}) {
                 double distance = Math.hypot(layout.x(pair[0]) - layout.x(pair[1]),
                     layout.y(pair[0]) - layout.y(pair[1]));
                 assertTrue("Adjacent targets " + pair[0] + " and " + pair[1] + " need a clear gap",

@@ -2,6 +2,7 @@ package com.halo.decomp;
 
 import android.app.Application;
 import android.app.AlertDialog;
+import android.content.SharedPreferences;
 import android.graphics.Bitmap;
 import android.graphics.Canvas;
 import android.os.SystemClock;
@@ -91,6 +92,101 @@ public class TouchControlsMultitouchHostTest {
         layout = ReflectionHelpers.getField(controls, "layout");
         controls.reset();
         downTime = SystemClock.uptimeMillis();
+    }
+
+    @Test public void jumpMeleeUpdateSwapsEverySavedHudOnceAndPreservesOtherSettings() {
+        SharedPreferences preferences = controls.getContext().getSharedPreferences("touch-layout-v1", 0);
+        SharedPreferences.Editor changes = preferences.edit().clear().putBoolean("auto-walk", false)
+            .putBoolean("hidden", true).putInt("hud-slot", 2);
+        String[] keys = {"configuration", "hud-layout-0", "hud-layout-1", "hud-layout-2"};
+        String[] before = new String[keys.length];
+        for (int slot = 0; slot < keys.length; slot++) {
+            TouchLayout custom = new TouchLayout();
+            custom.restore(0, 700 + slot * 20, 420 + slot * 5);
+            custom.restore(1, 830 + slot * 10, 290 + slot * 5);
+            custom.restore(2, 500, 250);
+            custom.setSize(0, .85f);
+            custom.setSize(1, 1.25f);
+            custom.setOpacity(.55f);
+            custom.setOpacity(0, .31f);
+            custom.setOpacity(1, .82f);
+            custom.setShown(1, false);
+            custom.rumbleEnabled = false;
+            custom.gyroscopeEnabled = true;
+            custom.floatingStick = true;
+            assertTrue(custom.duplicate(0) >= TouchLayout.BASE_COUNT);
+            before[slot] = custom.exportConfiguration(1.3f + slot * .1f, 2.5f + slot * .1f);
+            changes.putString(keys[slot], before[slot]);
+        }
+        assertTrue(changes.commit());
+        new TouchControls(controls.getContext());
+        for (int slot = 0; slot < keys.length; slot++)
+            assertOnlyJumpMeleeCoordinatesChanged(before[slot], preferences.getString(keys[slot], null));
+        assertFalse(preferences.getBoolean("auto-walk", true));
+        assertTrue(preferences.getBoolean("hidden", false));
+        assertEquals(2, preferences.getInt("hud-slot", 0));
+        java.util.Map<String, ?> migrated = new java.util.HashMap<>(preferences.getAll());
+        new TouchControls(controls.getContext());
+        assertEquals("Reopening never swaps the saved controls back", migrated, preferences.getAll());
+    }
+
+    @Test public void jumpMeleeUpdateLeavesMissingAndInvalidSlotsAndRespectsLaterImports() {
+        SharedPreferences preferences = controls.getContext().getSharedPreferences("touch-layout-v1", 0);
+        preferences.edit().clear().putString("configuration", "invalid layout")
+            .putString("hud-layout-1", "invalid slot").commit();
+        TouchControls restored = new TouchControls(controls.getContext());
+        assertEquals("invalid layout", preferences.getString("configuration", null));
+        assertEquals("invalid slot", preferences.getString("hud-layout-1", null));
+        assertFalse(preferences.contains("hud-layout-0"));
+        assertFalse(preferences.contains("hud-layout-2"));
+        TouchLayout authored = new TouchLayout();
+        authored.restore(0, 710, 410);
+        authored.restore(1, 820, 290);
+        restored.layout(0, 0, 960, 540);
+        restored.importLayout(authored.exportConfiguration(1.6f, 3.1f));
+        TouchLayout.Configuration imported = TouchLayout.importConfiguration(restored.exportLayout());
+        assertEquals(710, imported.layout.savedX(0), .001f);
+        assertEquals(410, imported.layout.savedY(0), .001f);
+        assertEquals(820, imported.layout.savedX(1), .001f);
+        assertEquals(290, imported.layout.savedY(1), .001f);
+        assertEquals(1.6f, imported.sensitivity, 0);
+        assertEquals(3.1f, imported.horizontalSensitivity, 0);
+    }
+
+    @Test public void jumpAtFormerMeleePositionAndMeleeAtFormerJumpPositionSendTheirOwnButtons() {
+        assertEquals(900, layout.savedX(0), 0);
+        assertEquals(342, layout.savedY(0), 0);
+        assertEquals(900, layout.savedX(1), 0);
+        assertEquals(432, layout.savedY(1), 0);
+        for (int control = 0; control <= 1; control++) {
+            event(MotionEvent.ACTION_DOWN, point(17, layout.x(control), layout.y(control)));
+            assertEquals("Jump stays A and melee stays B", 1 << control, NativeSink.state[6]);
+            assertEquals("Neither action fires RT", 0, NativeSink.state[5]);
+            event(MotionEvent.ACTION_UP, point(17, layout.x(control), layout.y(control)));
+            assertReleased();
+        }
+    }
+
+    private static void assertOnlyJumpMeleeCoordinatesChanged(String before, String after) {
+        TouchLayout.Configuration previous = TouchLayout.importConfiguration(before);
+        TouchLayout.Configuration migrated = TouchLayout.importConfiguration(after);
+        assertEquals(previous.sensitivity, migrated.sensitivity, 0);
+        assertEquals(previous.horizontalSensitivity, migrated.horizontalSensitivity, 0);
+        TouchLayout old = previous.layout, updated = migrated.layout;
+        assertEquals(old.size(), updated.size());
+        assertEquals(old.rumbleEnabled, updated.rumbleEnabled);
+        assertEquals(old.gyroscopeEnabled, updated.gyroscopeEnabled);
+        assertEquals(old.floatingStick, updated.floatingStick);
+        assertEquals(old.opacity, updated.opacity, 0);
+        for (int control = 0; control < old.size(); control++) {
+            int source = control < 2 ? 1 - control : control;
+            assertEquals(old.savedX(source), updated.savedX(control), 0);
+            assertEquals(old.savedY(source), updated.savedY(control), 0);
+            assertEquals(old.type(control), updated.type(control));
+            assertEquals(old.sizeScale(control), updated.sizeScale(control), 0);
+            assertEquals(old.opacity(control), updated.opacity(control), 0);
+            assertEquals(old.shown(control), updated.shown(control));
+        }
     }
 
     @Test public void serialChurnWithUnchangedBindingsNeverRedrawsHud() {

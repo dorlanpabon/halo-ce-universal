@@ -44,7 +44,7 @@ final class TouchLayout {
 
     /** each kind's default place on the grid, and its radius */
     private static final float[][] DEFAULTS = {
-        {856, 447}, {913, 377}, {794, 377}, {850, 312}, {915, 239}, {802, 239},
+        {913, 377}, {856, 447}, {794, 377}, {850, 312}, {915, 239}, {802, 239},
         {236, 449}, {691, 449}, {360, 490}, {438, 490}, {570, 36}, {390, 36},
         {100, 237}, {100, 335}, {51, 286}, {149, 286}, {115, 440}, {255, 239}
     };
@@ -154,6 +154,16 @@ final class TouchLayout {
 
     float savedY(int control) {
         return controls.get(control).y * GRID_HEIGHT / height;
+    }
+
+    /** Exchange the base jump and melee positions without changing either control's settings. */
+    void swapJumpMeleePositions() {
+        Control jump = controls.get(0), melee = controls.get(1);
+        float x = jump.x, y = jump.y;
+        jump.x = melee.x;
+        jump.y = melee.y;
+        melee.x = x;
+        melee.y = y;
     }
 
     void safeInsets(float left, float top, float right, float bottom) {
