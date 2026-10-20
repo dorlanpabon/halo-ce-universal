@@ -52,12 +52,12 @@ final class DataPackages {
         }
         LinearLayout content = column(activity);
         TextView help = new TextView(activity);
-        help.setText("Pega un enlace HTTPS directo o una página pública de MediaFire con tus datos de Halo Xbox: "
-            + "ZIP con una carpeta maps, o imagen ISO/XISO. La APK no incluye los archivos comerciales del juego. "
-            + "La descarga se instala directamente en este teléfono.");
+        help.setText("Admite ISO/XISO de Halo para Xbox desde MediaFire o un enlace HTTPS directo. "
+            + "También admite ZIP con una carpeta maps. Pega el enlace público del archivo de MediaFire "
+            + "o su enlace directo. Los datos se instalan en este teléfono; no vienen incluidos en la APK.");
         content.addView(help);
         EditText address = new EditText(activity);
-        address.setHint("https://…/halo-datos.zip");
+        address.setHint("Enlace de MediaFire o URL HTTPS de ISO/XISO/ZIP");
         address.setSingleLine(true);
         address.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_URI);
         content.addView(address);
