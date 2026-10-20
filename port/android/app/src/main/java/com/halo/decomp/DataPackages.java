@@ -2,6 +2,8 @@ package com.halo.decomp;
 
 import android.app.Activity;
 import android.app.AlertDialog;
+import android.content.Intent;
+import android.net.Uri;
 import android.os.SystemClock;
 import android.text.InputType;
 import android.widget.EditText;
@@ -12,6 +14,7 @@ import android.widget.TextView;
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
+import java.io.InterruptedIOException;
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.nio.charset.StandardCharsets;
@@ -37,8 +40,8 @@ final class DataPackages {
         }
         LinearLayout content = column(activity);
         TextView help = new TextView(activity);
-        help.setText("Pega una URL HTTPS de tus datos de Halo Xbox: ZIP con una carpeta maps, "
-            + "o imagen ISO/XISO. La APK no incluye los archivos comerciales del juego. "
+        help.setText("Pega un enlace HTTPS directo o una página pública de MediaFire con tus datos de Halo Xbox: "
+            + "ZIP con una carpeta maps, o imagen ISO/XISO. La APK no incluye los archivos comerciales del juego. "
             + "La descarga se instala directamente en este teléfono.");
         content.addView(help);
         EditText address = new EditText(activity);
@@ -79,7 +82,7 @@ final class DataPackages {
         AtomicBoolean canceled = new AtomicBoolean();
         LinearLayout content = column(activity);
         TextView status = new TextView(activity);
-        status.setText("Conectando… Mantén la aplicación abierta.");
+        status.setText("Resolviendo enlace… Mantén la aplicación abierta.");
         ProgressBar bar = new ProgressBar(activity, null, android.R.attr.progressBarStyleHorizontal);
         bar.setMax(1000);
         bar.setIndeterminate(true);
@@ -96,9 +99,16 @@ final class DataPackages {
             long[] lastReport = {0};
             String failure = null;
             boolean installed = false;
+            boolean downloaded = false;
             try {
-                ControlsDownload.transfer(url, archive, MAX_DOWNLOAD, canceled, (done, total) ->
+                String source = DataDownloadSource.resolve(url, canceled);
+                if (activity.isFinishing() || activity.isDestroyed())
+                    canceled.set(true);
+                if (canceled.get())
+                    throw new InterruptedIOException("Descarga cancelada.");
+                ControlsDownload.transfer(source, archive, MAX_DOWNLOAD, canceled, (done, total) ->
                     report(activity, progress, canceled, status, bar, "Descargando", done, total, lastReport));
+                downloaded = true;
                 String map = GameDataPackage.install(archive, root, canceled, (file, done, total) ->
                     report(activity, progress, canceled, status, bar, "Instalando " + file, done, total, lastReport));
                 installed = true;
@@ -119,6 +129,7 @@ final class DataPackages {
             }
             String error = failure;
             boolean success = installed;
+            boolean browserFallback = !downloaded && DataDownloadSource.isMediaFirePage(url);
             activity.runOnUiThread(() -> {
                 if (activity.isFinishing() || activity.isDestroyed())
                     return;
@@ -129,8 +140,7 @@ final class DataPackages {
                         .setPositiveButton("Jugar", (d, w) -> ready.run()).create();
                     open.accept(complete);
                 } else if (!canceled.get()) {
-                    message(activity, open, "No se pudo instalar el paquete.\n" + error
-                        + "\nPuedes volver a intentarlo.");
+                    downloadFailure(activity, open, error, browserFallback ? url : null);
                 }
                 progress.dismiss();
             });
@@ -163,6 +173,27 @@ final class DataPackages {
         int padding = Math.round(20 * activity.getResources().getDisplayMetrics().density);
         content.setPadding(padding, padding / 2, padding, 0);
         return content;
+    }
+
+    static void downloadFailure(Activity activity, Consumer<AlertDialog> open, String error, String page) {
+        AlertDialog.Builder dialog = new AlertDialog.Builder(activity).setTitle("Paquete de datos")
+            .setMessage("No se pudo instalar el paquete.\n" + error + "\nPuedes volver a intentarlo.");
+        if (DataDownloadSource.isMediaFirePage(page)) {
+            dialog.setMessage("MediaFire requiere abrir la descarga en el navegador.\n" + error
+                + "\nSi descargaste una ISO/XISO, vuelve a Halo y pulsa «Elegir imagen de disco». "
+                + "Para un ZIP, usa su enlace directo en el descargador de Halo.")
+                .setPositiveButton("Abrir MediaFire", (d, w) -> {
+                    try {
+                        activity.startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(page)));
+                    } catch (RuntimeException e) {
+                        message(activity, open, "No se pudo abrir el navegador. Abre el enlace en tu navegador "
+                            + "y después elige la imagen de disco en Halo.");
+                    }
+                }).setNegativeButton("Cerrar", null);
+        } else {
+            dialog.setPositiveButton("Aceptar", null);
+        }
+        open.accept(dialog.create());
     }
 
     private static void message(Activity activity, Consumer<AlertDialog> open, String text) {

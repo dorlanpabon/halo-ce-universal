@@ -26,7 +26,9 @@ public class ControlsDownloadTest {
         final long length;
         final int code;
         String location;
+        String contentType;
         boolean disconnected;
+        boolean streamOpened;
         InputStream stream;
         Response(int code, String body, long length) throws Exception {
             super(new URL("https://example.test/package"));
@@ -36,8 +38,12 @@ public class ControlsDownloadTest {
         }
         @Override public int getResponseCode() { return code; }
         @Override public long getContentLengthLong() { return length; }
+        @Override public String getContentType() { return contentType; }
         @Override public String getHeaderField(String name) { return "Location".equals(name) ? location : null; }
-        @Override public InputStream getInputStream() { return stream == null ? new ByteArrayInputStream(bytes) : stream; }
+        @Override public InputStream getInputStream() {
+            streamOpened = true;
+            return stream == null ? new ByteArrayInputStream(bytes) : stream;
+        }
         @Override public void disconnect() { disconnected = true; }
         @Override public boolean usingProxy() { return false; }
         @Override public void connect() {}
@@ -190,5 +196,46 @@ public class ControlsDownloadTest {
                 new AtomicBoolean(), network));
             assertTrue(response.disconnected);
         }
+    }
+
+    @Test public void webPagesAreRejectedBeforeReadingAndPreserveExistingPackage() throws Exception {
+        for (String type : new String[] {"text/html", "Text/HTML; charset=UTF-8", "application/xhtml+xml"}) {
+            Network network = new Network();
+            Response response = new Response(200, "<html>landing page</html>", -1);
+            response.contentType = type;
+            network.replies.add(response);
+            File destination = new File(temporary.getRoot(), "preserved.zip");
+            Files.write(destination.toPath(), "old".getBytes(StandardCharsets.UTF_8));
+            assertThrows(IOException.class, () -> ControlsDownload.transfer("https://example.test/package", destination,
+                100, new AtomicBoolean(), (received, total) -> {}, network));
+            assertFalse(response.streamOpened);
+            assertTrue(response.disconnected);
+            assertEquals("old", contents(destination));
+            assertNoPartial();
+        }
+    }
+
+    @Test public void binaryContentTypesRemainSupported() throws Exception {
+        for (String type : new String[] {null, "application/octet-stream", "application/zip", "application/x-iso9660-image"}) {
+            Network network = new Network();
+            Response response = new Response(200, "data", 4);
+            response.contentType = type;
+            network.replies.add(response);
+            File destination = new File(temporary.getRoot(), "package.iso");
+            assertEquals(4, ControlsDownload.transfer("https://example.test/package", destination,
+                100, new AtomicBoolean(), (received, total) -> {}, network));
+            assertEquals("data", contents(destination));
+            assertNoPartial();
+        }
+    }
+
+    @Test public void boundedTextReaderStillAcceptsLandingPageHtml() throws Exception {
+        Network network = new Network();
+        Response response = new Response(200, "<a id='downloadButton'>Download</a>", -1);
+        response.contentType = "text/html; charset=UTF-8";
+        network.replies.add(response);
+        assertEquals(new String(response.bytes, StandardCharsets.UTF_8), ControlsDownload.readText(
+            "https://www.mediafire.com/file/example", 100, new AtomicBoolean(), network));
+        assertTrue(response.disconnected);
     }
 }

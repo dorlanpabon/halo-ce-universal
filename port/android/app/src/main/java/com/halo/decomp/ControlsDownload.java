@@ -104,6 +104,13 @@ final class ControlsDownload {
         HttpURLConnection connection = null;
         try {
             connection = open(address, canceled, connections);
+            String type = connection.getContentType();
+            if (type != null) {
+                type = type.split(";", 2)[0].trim();
+                if (type.equalsIgnoreCase("text/html") || type.equalsIgnoreCase("application/xhtml+xml"))
+                    throw new IOException("El enlace devuelve una página web, no un archivo. "
+                        + "Usa un enlace directo o una página pública de MediaFire.");
+            }
             long total = connection.getContentLengthLong();
             if (total > maxBytes)
                 throw new IOException("El paquete supera el tamaño permitido.");
